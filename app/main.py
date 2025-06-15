@@ -111,7 +111,7 @@ class AstroCalculator:
                     planeta_natal=planet2,
                     tipo_aspecto=aspect_name,
                     natureza=nature,
-                    orb=round(current_orb, 2),
+                    orbe=round(current_orb, 2),
                     intensidade=intensity
                 )
         
@@ -265,6 +265,98 @@ async def test_connection(data: Dict[str, Any]):
         "timestamp": time.time()
     }
 
+@app.post("/analyze-real-data")
+async def analyze_real_data(data: List[Dict[str, Any]]):
+    """Endpoint para análise de dados reais no formato array"""
+    try:
+        logger.info(f"📊 Dados recebidos: {len(data)} elementos")
+        
+        # Log dos primeiros elementos para debug
+        for i in range(min(3, len(data))):
+            logger.info(f"Elemento {i}: {data[i]}")
+        
+        # 1. Verificar se temos dados suficientes
+        if len(data) < 23:
+            raise ValueError(f"Array muito pequeno. Recebido: {len(data)}, esperado: pelo menos 23")
+        
+        # 2. Separar trânsitos lentos (0-10)
+        logger.info("🔄 Separando trânsitos lentos...")
+        transitos_lentos_raw = data[0:11]
+        transitos_lentos = []
+        for i, planet in enumerate(transitos_lentos_raw):
+            try:
+                transitos_lentos.append(Planet(**planet))
+                logger.info(f"✅ Trânsito lento {i}: {planet.get('name', 'sem nome')}")
+            except Exception as e:
+                logger.error(f"❌ Erro no trânsito lento {i}: {e}")
+                raise
+        
+        # 3. Separar natal (11-21)
+        logger.info("🔄 Separando natal...")
+        natal_raw = data[11:22]
+        natal = []
+        for i, planet in enumerate(natal_raw):
+            try:
+                natal.append(Planet(**planet))
+                logger.info(f"✅ Natal {i}: {planet.get('name', 'sem nome')}")
+            except Exception as e:
+                logger.error(f"❌ Erro no natal {i}: {e}")
+                raise
+        
+        # 4. Separar cúspides (posição 22)
+        logger.info("🔄 Separando cúspides...")
+        cuspides_raw = data[22]
+        logger.info(f"📍 Cúspides raw: {cuspides_raw}")
+        
+        try:
+            houses = HouseSystem(
+                houses=[House(**house) for house in cuspides_raw.get("houses", [])],
+                ascendant=cuspides_raw.get("ascendant"),
+                midheaven=cuspides_raw.get("midheaven"),
+                vertex=cuspides_raw.get("vertex")
+            )
+            logger.info(f"✅ Houses criado com {len(houses.houses)} casas")
+        except Exception as e:
+            logger.error(f"❌ Erro nas cúspides: {e}")
+            raise
+        
+        # 5. Separar trânsitos rápidos (23+)
+        logger.info("🔄 Separando trânsitos rápidos...")
+        transitos_rapidos = []
+        if len(data) > 23:
+            transitos_rapidos_raw = data[23:]
+            for i, planet in enumerate(transitos_rapidos_raw):
+                try:
+                    transitos_rapidos.append(Planet(**planet))
+                    logger.info(f"✅ Trânsito rápido {i}: {planet.get('name', 'sem nome')}")
+                except Exception as e:
+                    logger.error(f"❌ Erro no trânsito rápido {i}: {e}")
+                    # Não parar por trânsitos rápidos
+                    continue
+        
+        # 6. Criar request
+        logger.info("🔄 Criando request...")
+        request = AnalysisRequest(
+            transitos_lentos=transitos_lentos,
+            natal=natal,
+            houses=houses,
+            transitos_rapidos=transitos_rapidos
+        )
+        logger.info("✅ Request criado com sucesso")
+        
+        # 7. Chamar análise
+        logger.info("🔄 Iniciando análise...")
+        result = await analyze_professional_area(request)
+        logger.info("✅ Análise concluída com sucesso")
+        
+        return result
+        
+    except Exception as e:
+        error_msg = f"Erro ao processar dados: {str(e)}"
+        logger.error(f"❌ {error_msg}")
+        logger.error(f"📊 Dados recebidos: {len(data) if 'data' in locals() else 'N/A'} elementos")
+        raise HTTPException(status_code=400, detail=error_msg)
+
 # ============ EXECUÇÃO ============
 
 if __name__ == "__main__":
@@ -278,4 +370,4 @@ if __name__ == "__main__":
         port=8000, 
         reload=True,
         log_level="info"
-    ) 
+    )
