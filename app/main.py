@@ -1303,7 +1303,7 @@ class AstroEngineCompleto:
                 natal, houses_array, dias_restantes_signo, velocidade
             )
         
-        # Calcular retrogradações - usar dados reais
+        # Calcular retrogradacoes - usar dados reais
         retrogradacoes = self.calcular_retrogradacoes(planeta, planeta.get('sign'), velocidade)
         
         return {
@@ -1389,13 +1389,13 @@ class AstroEngineCompleto:
         for nome_planeta in planetas_relevantes:
             logger.info(f"Searching for relevant planet: {nome_planeta}")
             planeta = self.encontrar_planeta(nome_planeta, transitos_atuais)
-
+            
             if planeta:
                 logger.info(f"Found {nome_planeta}. Processing...")
                 try:
                     analise = self.analisar_transito_planeta(planeta, natal, houses_array)
                     analise_completa.append(analise)
-
+                    
                     logger.info(f"{nome_planeta}: Relevância {analise['relevancia']}, {analise['analise_signo_atual']['resumo']['total_aspectos']} aspectos")
                 except Exception as error:
                     logger.error(f"Erro ao analisar {nome_planeta}: {error}")
@@ -1462,6 +1462,86 @@ class AstroEngineCompleto:
                 ]),
                 'fonte_dados': 'NASA_JPL' if self.usar_nasa else 'ALTERNATIVO',
                 'precisao_melhorada': True
+            }
+        }
+
+    def analisar_transito_em_signo_corrigido(self, planeta, signo, grau_inicio, grau_fim, natal, houses_array, dias_ate_entrada, velocidade):
+        """Análise corrigida com timing realista"""
+        
+        # CASAS ATIVADAS - com cálculo realista
+        casas_ativadas = []
+        casas_vistas = set()
+        
+        # Verificar casas a cada 5 graus (mais realista)
+        for grau in range(int(grau_inicio), int(grau_fim), 5):
+            casa = self.determinar_casa(grau, houses_array)
+            if casa and casa['casa'] not in casas_vistas:
+                casas_vistas.add(casa['casa'])
+                
+                # Timing realista da casa
+                grau_entrada_casa = grau
+                grau_saida_casa = min(grau + 15, grau_fim)  # Máximo 15 graus por casa
+                
+                dias_ate_entrada_casa = dias_ate_entrada + max(0, (grau_entrada_casa - grau_inicio) / velocidade)
+                dias_na_casa = max(1, (grau_saida_casa - grau_entrada_casa) / velocidade)
+                
+                # Limitar permanência máxima por casa
+                if dias_na_casa > 365:
+                    dias_na_casa = 365
+                
+                casas_ativadas.append({
+                    'casa': casa['casa'],
+                    'data_entrada': self.calcular_data_futura(int(dias_ate_entrada_casa)),
+                    'data_saida': self.calcular_data_futura(int(dias_ate_entrada_casa + dias_na_casa)),
+                    'permanencia_meses': round(dias_na_casa / 30, 1),
+                    'grau_entrada': round(grau_entrada_casa, 1),
+                    'grau_saida': round(grau_saida_casa, 1)
+                })
+        
+        # ASPECTOS COM PLANETAS NATAIS - simplificado e realista
+        aspectos_com_natal = []
+        
+        # Verificar aspectos apenas em 3 pontos-chave
+        graus_chave = [5, 15, 25]  # Graus mais realistas
+        
+        for grau_relativo in graus_chave:
+            grau_absoluto = grau_inicio + grau_relativo
+            dias_ate_grau = dias_ate_entrada + (grau_relativo / velocidade)
+            
+            for planeta_natal in natal:
+                if not planeta_natal or not planeta_natal.get('name'):
+                    continue
+                
+                diferenca = self.calcular_diferenca(grau_absoluto, planeta_natal.get('fullDegree', 0))
+                aspecto = self.identificar_aspecto(diferenca)
+                
+                if aspecto and aspecto['orbe'] <= 3:  # Orbe mais restritiva
+                    dias_orbe = 10  # Orbe fixa de 10 dias
+                    
+                    aspectos_com_natal.append({
+                        'planeta_natal': planeta_natal.get('name'),
+                        'signo_natal': planeta_natal.get('sign'),
+                        'casa_natal': planeta_natal.get('house'),
+                        'tipo_aspecto': aspecto['nome'],
+                        'natureza': aspecto['natureza'],
+                        'intensidade': aspecto['intensidade'],
+                        'grau_aspecto': grau_relativo,
+                        'data_inicio': self.calcular_data_futura(int(dias_ate_grau - dias_orbe)),
+                        'data_exata': self.calcular_data_futura(int(dias_ate_grau)),
+                        'data_fim': self.calcular_data_futura(int(dias_ate_grau + dias_orbe)),
+                        'orbe': round(aspecto['orbe'], 1),
+                        'casa_ativada': self.determinar_casa(grau_absoluto, houses_array)['casa'] if self.determinar_casa(grau_absoluto, houses_array) else None
+                    })
+        
+        return {
+            'signo': signo,
+            'casas_ativadas': casas_ativadas,
+            'aspectos_com_natal': aspectos_com_natal,
+            'resumo': {
+                'total_casas': len(casas_ativadas),
+                'total_aspectos': len(aspectos_com_natal),
+                'aspectos_harmonicos': len([a for a in aspectos_com_natal if a['natureza'] == 'harmonioso']),
+                'aspectos_desafiadores': len([a for a in aspectos_com_natal if a['natureza'] == 'desafiador'])
             }
         }
 
