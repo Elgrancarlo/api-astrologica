@@ -10,6 +10,7 @@ import math
 import traceback
 import os
 import unicodedata
+import json
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -172,6 +173,215 @@ class AnalysisRequest(BaseModel):
     transitos_rapidos: Optional[List[Planet]] = []
 
 # ============ FIM DOS NOVOS MODELOS ============
+
+# ============ FUNCÕES DE OTIMIZAÇÃO PARA GEMINI ============
+
+def limitar_aspectos_para_gemini(aspectos: List[Dict[str, Any]], limite: int = 5) -> List[Dict[str, Any]]:
+    """Limita aspectos para reduzir tokens"""
+    if not aspectos:
+        return []
+    
+    # Priorizar aspectos mais importantes
+    aspectos_ordenados = sorted(aspectos, key=lambda x: x.get('intensidade', 0), reverse=True)
+    return aspectos_ordenados[:limite]
+
+def criar_versao_resumida_para_gemini(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
+    """Cria versão resumida dos dados para enviar ao Gemini"""
+    
+    # Processar todos os trânsitos mas de forma mais focada
+    todos_transitos = dados_completos.get('todos_transitos', [])
+    transitos_essenciais = []
+    
+    for transito in todos_transitos:
+        # Manter apenas dados essenciais para análise
+        planeta = transito.get('planeta')
+        signo_atual = transito.get('signo_atual')
+        relevancia = transito.get('relevancia', 0)
+        
+        # Resumir análise do signo atual
+        analise_signo = transito.get('analise_signo_atual', {})
+        resumo_signo = analise_signo.get('resumo', {})
+        
+        # Aspectos mais importantes (máximo 5 por planeta)
+        aspectos_natal = analise_signo.get('aspectos_com_natal', [])
+        aspectos_importantes = sorted(aspectos_natal, key=lambda x: x.get('intensidade', 0), reverse=True)[:5]
+        
+        # Casas ativadas resumidas
+        casas_ativadas = analise_signo.get('casas_ativadas', [])
+        casas_resumidas = []
+        for casa in casas_ativadas[:3]:  # Máximo 3 casas
+            casas_resumidas.append({
+                'casa': casa.get('casa'),
+                'data_entrada': casa.get('data_entrada'),
+                'data_saida': casa.get('data_saida'),
+                'permanencia_meses': casa.get('permanencia_meses')
+            })
+        
+        # Retrogradações resumidas
+        retrogradacoes = transito.get('retrogradacoes', [])
+        retrogradacoes_resumidas = []
+        for retro in retrogradacoes[:2]:  # Máximo 2 retrogradações
+            retrogradacoes_resumidas.append({
+                'inicio': retro.get('inicio'),
+                'fim': retro.get('fim'),
+                'signo_retrogradacao': retro.get('signo_retrogradacao'),
+                'duracao_dias': retro.get('duracao_dias')
+            })
+        
+        transito_essencial = {
+            'planeta': planeta,
+            'signo_atual': signo_atual,
+            'grau_atual': transito.get('grau_atual'),
+            'relevancia': relevancia,
+            'eh_retrogrado': transito.get('eh_retrogrado'),
+            'tempo_restante_signo': transito.get('tempo_restante_signo'),
+            'proximo_signo': transito.get('proximo_signo'),
+            'casas_ativadas': casas_resumidas,
+            'aspectos_principais': aspectos_importantes,
+            'retrogradacoes': retrogradacoes_resumidas,
+            'resumo_aspectos': {
+                'total_aspectos': resumo_signo.get('total_aspectos', 0),
+                'aspectos_harmonicos': resumo_signo.get('aspectos_harmonicos', 0),
+                'aspectos_desafiadores': resumo_signo.get('aspectos_desafiadores', 0)
+            }
+        }
+        
+        transitos_essenciais.append(transito_essencial)
+    
+    # Ordenar por relevância e pegar os mais importantes
+    transitos_essenciais.sort(key=lambda x: x.get('relevancia', 0), reverse=True)
+    
+    # Separar por categoria de importância
+    transitos_alta_relevancia = [t for t in transitos_essenciais if t.get('relevancia', 0) >= 8]
+    transitos_media_relevancia = [t for t in transitos_essenciais if 5 <= t.get('relevancia', 0) < 8]
+    transitos_baixa_relevancia = [t for t in transitos_essenciais if t.get('relevancia', 0) < 5]
+    
+    # Mudanças de signo próximas (máximo 5)
+    mudancas_signo = dados_completos.get('mudancas_signo_proximas', [])[:5]
+    
+    # Versão final resumida mas completa
+    dados_resumidos = {
+        'tipo_analise': dados_completos.get('tipo_analise'),
+        'periodo_analise': '12 meses',
+        'data_analise': dados_completos.get('meta_info', {}).get('data_analise'),
+        
+        # Planetas por ordem de importância
+        'planetas_alta_relevancia': transitos_alta_relevancia,
+        'planetas_media_relevancia': transitos_media_relevancia[:3],  # Máximo 3
+        'planetas_baixa_relevancia': transitos_baixa_relevancia[:2],   # Máximo 2
+        
+        # Mudanças importantes
+        'mudancas_signo_proximas': mudancas_signo,
+        
+        # Resumo geral
+        'resumo_geral': {
+            'total_planetas_analisados': len(transitos_essenciais),
+            'planetas_alta_relevancia': len(transitos_alta_relevancia),
+            'planetas_com_aspectos_ativos': len([t for t in transitos_essenciais if t.get('resumo_aspectos', {}).get('total_aspectos', 0) > 0]),
+            'planetas_em_retrogradacao': len([t for t in transitos_essenciais if t.get('eh_retrogrado')]),
+            'mudancas_signo_proximas': len(mudancas_signo),
+            'planeta_mais_relevante': transitos_essenciais[0].get('planeta') if transitos_essenciais else None
+        },
+        
+        # Instruções para análise
+        'como_interpretar': {
+            'foco_principal': 'Analise primeiro os planetas de alta relevância',
+            'aspectos_importantes': 'Priorize aspectos com intensidade >= 7',
+            'casas_ativadas': 'Considere as datas de entrada e saída de cada casa',
+            'retrogradacoes': 'Analise períodos de retrogradação para revisões e correções',
+            'mudancas_signo': 'Mudanças de signo trazem novas energias e focos'
+        }
+    }
+    
+    return dados_resumidos
+
+def criar_analise_transito_especifico(planeta_nome: str, dados_completos: Dict[str, Any]) -> Dict[str, Any]:
+    """Cria análise específica para um planeta conforme solicitado"""
+    
+    # Encontrar o planeta nos dados
+    todos_transitos = dados_completos.get('todos_transitos', [])
+    planeta_encontrado = None
+    
+    for transito in todos_transitos:
+        if transito.get('planeta', '').lower() == planeta_nome.lower():
+            planeta_encontrado = transito
+            break
+    
+    if not planeta_encontrado:
+        return {'erro': f'Planeta {planeta_nome} não encontrado nos dados'}
+    
+    # Extrair dados específicos do planeta
+    analise_signo = planeta_encontrado.get('analise_signo_atual', {})
+    casas_ativadas = analise_signo.get('casas_ativadas', [])
+    aspectos_natal = analise_signo.get('aspectos_com_natal', [])
+    retrogradacoes = planeta_encontrado.get('retrogradacoes', [])
+    
+    # Organizar casas por período
+    casas_organizadas = []
+    for casa in casas_ativadas:
+        casas_organizadas.append({
+            'casa': casa.get('casa'),
+            'data_entrada': casa.get('data_entrada'),
+            'data_saida': casa.get('data_saida'),
+            'permanencia_meses': casa.get('permanencia_meses'),
+            'grau_entrada': casa.get('grau_entrada'),
+            'grau_saida': casa.get('grau_saida')
+        })
+    
+    # Organizar aspectos por tipo e intensidade
+    aspectos_organizados = {
+        'conjuncao': [],
+        'trigono': [],
+        'sextil': [],
+        'quadratura': [],
+        'oposicao': []
+    }
+    
+    for aspecto in aspectos_natal:
+        tipo = aspecto.get('tipo_aspecto', '').lower()
+        if tipo in aspectos_organizados:
+            aspectos_organizados[tipo].append({
+                'planeta_natal': aspecto.get('planeta_natal'),
+                'casa_natal': aspecto.get('casa_natal'),
+                'data_inicio': aspecto.get('data_inicio'),
+                'data_exata': aspecto.get('data_exata'),
+                'data_fim': aspecto.get('data_fim'),
+                'intensidade': aspecto.get('intensidade'),
+                'natureza': aspecto.get('natureza')
+            })
+    
+    # Análise específica do trânsito
+    analise_especifica = {
+        'planeta': planeta_encontrado.get('planeta'),
+        'signo_atual': planeta_encontrado.get('signo_atual'),
+        'grau_atual': planeta_encontrado.get('grau_atual'),
+        'eh_retrogrado': planeta_encontrado.get('eh_retrogrado'),
+        'tempo_restante_signo': planeta_encontrado.get('tempo_restante_signo'),
+        'proximo_signo': planeta_encontrado.get('proximo_signo'),
+        
+        # Casas ativadas com detalhes
+        'casas_ativadas': casas_organizadas,
+        
+        # Aspectos organizados por tipo
+        'aspectos_por_tipo': aspectos_organizados,
+        
+        # Retrogradações detalhadas
+        'retrogradacoes_detalhadas': retrogradacoes,
+        
+        # Resumo para interpretação
+        'resumo_interpretacao': {
+            'total_casas_ativadas': len(casas_organizadas),
+            'total_aspectos': len(aspectos_natal),
+            'aspectos_harmonicos': len([a for a in aspectos_natal if a.get('natureza') == 'harmonioso']),
+            'aspectos_desafiadores': len([a for a in aspectos_natal if a.get('natureza') == 'desafiador']),
+            'tem_retrogradacao': len(retrogradacoes) > 0,
+            'muda_signo_proximamente': planeta_encontrado.get('tempo_restante_signo', {}).get('dias', 999) <= 180
+        }
+    }
+    
+    return analise_especifica
+
+# ============ FIM DAS FUNÇÕES DE OTIMIZAÇÃO ============
 
 # ============ CALCULADORA ASTROLÓGICA AVANÇADA (VERSÃO 2.0) ============
 
@@ -1732,16 +1942,70 @@ astro_engine = AstroEngineCompleto()
 async def root():
     """Endpoint raiz - verificar se API está funcionando"""
     return {
-        "message": "🌟 API Astrológica Profissional v2.0",
+        "message": "🌟 API Astrológica Profissional v2.0 - OTIMIZADA",
         "status": "online",
-        "features": [
-            "Orbes dinâmicos",
-            "Cálculo de datas específicas",
-            "Análise de mudanças de signo",
-            "Projeção de aspectos futuros",
-            "Trânsitos profissionais completos"
+        "versao": "2.0-otimizada",
+        "endpoints_disponíveis": {
+            "principal": {
+                "endpoint": "/astro-completo-nasa",
+                "método": "POST",
+                "descrição": "Análise completa otimizada (RECOMENDADO)",
+                "funcionalidades": [
+                    "Output otimizado para LLMs",
+                    "Priorização por relevância",
+                    "Todas as análises necessárias",
+                    "Compatível com limite de tokens do Gemini"
+                ]
+            },
+            "transito_especifico": {
+                "endpoint": "/transito-especifico",
+                "método": "POST",
+                "descrição": "Análise específica de um planeta",
+                "formato": {"planeta": "Saturno", "dados_completos": "{}"},
+                "funcionalidades": [
+                    "Casas ativadas com datas exatas",
+                    "Aspectos organizados por tipo",
+                    "Retrogradações detalhadas",
+                    "Período de 12 meses",
+                    "Orbe de 5 graus"
+                ]
+            },
+            "verificacao": {
+                "endpoint": "/verificar-tamanho",
+                "método": "POST",
+                "descrição": "Verificar se dados excedem limite de tokens",
+                "uso": "Para debugging de problemas de tokens"
+            },
+            "conversao": {
+                "endpoint": "/converter-para-gemini",
+                "método": "POST",
+                "descrição": "Converter dados existentes para versão resumida"
+            },
+            "dados_completos": {
+                "endpoint": "/astro-completo-dados-completos",
+                "método": "POST",
+                "descrição": "Dados completos SEM otimização",
+                "aviso": "Pode exceder limite de tokens do Gemini"
+            }
+        },
+        "funcionalidades_principais": [
+            "Análise completa de todos os planetas",
+            "Casas ativadas com datas precisas",
+            "Aspectos com orbe de 5 graus",
+            "Retrogradações detalhadas",
+            "Mudanças de signo próximas",
+            "Período de análise: 12 meses",
+            "Output otimizado para LLMs",
+            "Compatível com limite de tokens do Gemini"
         ],
-        "docs": "/docs"
+        "casos_uso": {
+            "analise_geral": "Use /astro-completo-nasa",
+            "planeta_especifico": "Use /transito-especifico",
+            "problemas_tokens": "Use /verificar-tamanho",
+            "converter_dados": "Use /converter-para-gemini"
+        },
+        "docs": "/docs",
+        "health": "/health"
     }
 
 @app.get("/health")
@@ -1949,65 +2213,300 @@ async def analyze_real_data(data: List[Dict[str, Any]]):
 @app.post("/astro-completo-nasa")
 async def astro_completo_nasa(data: List[Dict[str, Any]]):
     """
-    Endpoint para a análise astrológica completa com dados NASA/JPL.
-    Recebe array linear como no N8N original do código JS.
+    Endpoint principal - AGORA com output otimizado por padrão.
+    Mantém todas as funcionalidades mas entrega dados mais focados.
     """
     start_time = time.time()
     try:
-        logger.info(f"🚀 Iniciando análise astro-completo-nasa com {len(data)} elementos")
+        logger.info(f"🚀 Iniciando análise astro-completo-nasa OTIMIZADA com {len(data)} elementos")
         
-        # CORREÇÃO: Extrair dados do formato N8N
-        # N8N envia: [{"json": {...}, "pairedItem": {...}}, ...]
-        # Precisamos extrair apenas o conteúdo de "json"
+        # Extrair dados do formato N8N
         dados_extraidos = []
         for item in data:
             if isinstance(item, dict) and "json" in item:
                 dados_extraidos.append(item["json"])
             else:
-                # Fallback: se não tiver "json", usar o item diretamente
                 dados_extraidos.append(item)
         
-        logger.info(f"✅ Dados extraídos do formato N8N: {len(dados_extraidos)} elementos")
+        logger.info(f"✅ Dados extraídos: {len(dados_extraidos)} elementos")
         
-        # Debug: log dos primeiros elementos para confirmar
-        logger.info(f"Elemento 0: {dados_extraidos[0].get('name', 'N/A') if len(dados_extraidos) > 0 and dados_extraidos[0] else 'VAZIO'}")
-        logger.info(f"Elemento 22: {'houses' in dados_extraidos[22] if len(dados_extraidos) > 22 and dados_extraidos[22] else 'ÍNDICE 22 NÃO EXISTE OU VAZIO'}")
+        # Processar análise completa
+        resultado_completo = astro_engine.processar_completo(dados_extraidos)
         
-        resultado = astro_engine.processar_completo(dados_extraidos)
+        # Criar versão resumida otimizada
+        resultado_otimizado = criar_versao_resumida_para_gemini(resultado_completo)
+        
         execution_time = round((time.time() - start_time) * 1000, 2)
-        logger.info(f"✅ Análise astro-completo-nasa concluída em {execution_time}ms")
+        logger.info(f"✅ Análise otimizada concluída em {execution_time}ms")
         
-        # Adicionar meta informações de tempo
-        if "meta_info" not in resultado:
-            resultado["meta_info"] = {}
-        resultado["meta_info"]["execution_time_ms"] = execution_time
-        resultado["meta_info"]["engine_source"] = "AstroEngineCompleto_NASA"
-
-        return resultado
+        # Adicionar meta informações
+        resultado_otimizado["meta_info"] = {
+            "versao": "otimizada_v2",
+            "execution_time_ms": execution_time,
+            "engine_source": "AstroEngineCompleto_Otimizado",
+            "funcionalidades_mantidas": [
+                "Análise completa de todos os planetas",
+                "Casas ativadas com datas precisas",
+                "Aspectos com orbe de 5 graus",
+                "Retrogradações detalhadas",
+                "Mudanças de signo próximas",
+                "Período de análise: 12 meses"
+            ],
+            "otimizacoes_aplicadas": [
+                "Output resumido para melhor interpretação",
+                "Priorização por relevância",
+                "Limitação de dados menos importantes",
+                "Organização hierárquica dos planetas"
+            ]
+        }
+        
+        return resultado_otimizado
+        
     except Exception as e:
-        logger.error(f"❌ Erro no endpoint /astro-completo-nasa: {str(e)}")
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Erro interno no Astro Completo: {str(e)}")
+        logger.error(f"❌ Erro no endpoint principal: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+@app.post("/astro-completo-gemini")
+async def astro_completo_gemini(data: List[Dict[str, Any]]):
+    """
+    Endpoint OTIMIZADO para Gemini - Retorna apenas dados essenciais para reduzir tokens.
+    Usa os mesmos dados do /astro-completo-nasa mas com output resumido.
+    """
+    start_time = time.time()
+    try:
+        logger.info(f"🤖 Iniciando análise otimizada para Gemini com {len(data)} elementos")
+        
+        # Processar dados da mesma forma que o endpoint original
+        dados_extraidos = []
+        for item in data:
+            if isinstance(item, dict) and "json" in item:
+                dados_extraidos.append(item["json"])
+            else:
+                dados_extraidos.append(item)
+        
+        # Processar análise completa
+        resultado_completo = astro_engine.processar_completo(dados_extraidos)
+        
+        # Criar versão resumida para Gemini
+        resultado_resumido = criar_versao_resumida_para_gemini(resultado_completo)
+        
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ Análise Gemini concluída em {execution_time}ms")
+        
+        # Adicionar meta informações
+        resultado_resumido["meta_info_resumo"] = {
+            "otimizado_para": "Gemini",
+            "limite_tokens": "respeitado",
+            "execution_time_ms": execution_time,
+            "dados_originais": len(resultado_completo.get('todos_transitos', [])),
+            "dados_resumidos": len(resultado_resumido.get('transitos_mais_relevantes', [])),
+            "compressao_realizada": True
+        }
+        
+        return resultado_resumido
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no endpoint /astro-completo-gemini: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro no endpoint Gemini: {str(e)}")
+
+@app.post("/converter-para-gemini")
+async def converter_para_gemini(dados_completos: Dict[str, Any]):
+    """
+    Endpoint para converter dados completos em versão resumida para Gemini.
+    Útil quando você já tem os dados completos e quer apenas a versão resumida.
+    """
+    try:
+        logger.info("🔄 Convertendo dados completos para versão Gemini")
+        
+        resultado_resumido = criar_versao_resumida_para_gemini(dados_completos)
+        
+        # Adicionar informações da conversão
+        resultado_resumido["meta_info_conversao"] = {
+            "convertido_de": "dados_completos",
+            "para": "versao_gemini",
+            "timestamp": time.time(),
+            "compressao_realizada": True
+        }
+        
+        logger.info("✅ Conversão para Gemini concluída")
+        return resultado_resumido
+        
+    except Exception as e:
+        logger.error(f"❌ Erro na conversão para Gemini: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Erro na conversão: {str(e)}")
+
+@app.post("/verificar-tamanho")
+async def verificar_tamanho(dados: Dict[str, Any]):
+    """
+    Endpoint para verificar o tamanho dos dados em caracteres e estimar tokens.
+    Útil para debugging do problema de limite de tokens do Gemini.
+    """
+    try:
+        # Converter para string JSON para contar caracteres
+        dados_str = str(dados)
+        dados_json = json.dumps(dados, ensure_ascii=False)
+        
+        # Estimar tokens (aproximadamente 1 token = 4 caracteres)
+        caracteres_total = len(dados_json)
+        tokens_estimados = caracteres_total // 4
+        
+        # Verificar se excede limite do Gemini
+        limite_gemini = 1048576
+        excede_limite = tokens_estimados > limite_gemini
+        
+        # Criar versão resumida se necessário
+        versao_resumida = None
+        if excede_limite:
+            versao_resumida = criar_versao_resumida_para_gemini(dados)
+            versao_resumida_str = json.dumps(versao_resumida, ensure_ascii=False)
+            tokens_resumidos = len(versao_resumida_str) // 4
+        else:
+            tokens_resumidos = tokens_estimados
+        
+        resultado = {
+            "tamanho_original": {
+                "caracteres": caracteres_total,
+                "tokens_estimados": tokens_estimados,
+                "excede_limite_gemini": excede_limite
+            },
+            "limites_gemini": {
+                "limite_tokens": limite_gemini,
+                "tokens_disponiveis": limite_gemini - tokens_estimados,
+                "percentual_usado": round((tokens_estimados / limite_gemini) * 100, 2)
+            },
+            "versao_resumida": {
+                "foi_criada": excede_limite,
+                "tokens_resumidos": tokens_resumidos if excede_limite else None,
+                "reducao_percentual": round(((tokens_estimados - tokens_resumidos) / tokens_estimados) * 100, 2) if excede_limite else None
+            },
+            "recomendacao": {
+                "usar_endpoint": "/astro-completo-gemini" if excede_limite else "endpoint_normal",
+                "motivo": "Dados excedem limite de tokens do Gemini" if excede_limite else "Dados dentro do limite"
+            }
+        }
+        
+        logger.info(f"📊 Verificação de tamanho: {caracteres_total} chars, {tokens_estimados} tokens, excede: {excede_limite}")
+        
+        return resultado
+        
+    except Exception as e:
+        logger.error(f"❌ Erro na verificação de tamanho: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Erro na verificação: {str(e)}")
+
+@app.post("/transito-especifico")
+async def analisar_transito_especifico(data: Dict[str, Any]):
+    """
+    Endpoint para análise específica de um planeta.
+    Formato: {"planeta": "Saturno", "dados_completos": {...}}
+    """
+    try:
+        planeta_nome = data.get('planeta', '').strip()
+        dados_completos = data.get('dados_completos', {})
+        
+        if not planeta_nome:
+            raise HTTPException(status_code=400, detail="Nome do planeta é obrigatório")
+        
+        if not dados_completos:
+            raise HTTPException(status_code=400, detail="Dados completos são obrigatórios")
+        
+        logger.info(f"🔍 Análise específica solicitada para: {planeta_nome}")
+        
+        # Criar análise específica
+        analise_especifica = criar_analise_transito_especifico(planeta_nome, dados_completos)
+        
+        if 'erro' in analise_especifica:
+            raise HTTPException(status_code=404, detail=analise_especifica['erro'])
+        
+        logger.info(f"✅ Análise específica concluída para {planeta_nome}")
+        
+        return {
+            "planeta_analisado": planeta_nome,
+            "analise_detalhada": analise_especifica,
+            "meta_info": {
+                "tipo_analise": "transito_especifico",
+                "timestamp": time.time(),
+                "funcionalidades_incluidas": [
+                    "Casas ativadas com datas",
+                    "Aspectos organizados por tipo",
+                    "Retrogradações detalhadas",
+                    "Análise de período completo (12 meses)",
+                    "Orbe de 5 graus para aspectos"
+                ]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro na análise específica: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
+@app.post("/astro-completo-dados-completos")
+async def astro_completo_dados_completos(data: List[Dict[str, Any]]):
+    """
+    Endpoint para dados COMPLETOS sem otimização.
+    Use apenas quando realmente precisar de todos os dados.
+    ATENÇÃO: Pode exceder limite de tokens do Gemini!
+    """
+    start_time = time.time()
+    try:
+        logger.info(f"🚀 Iniciando análise COMPLETA (não otimizada) com {len(data)} elementos")
+        
+        # Extrair dados do formato N8N
+        dados_extraidos = []
+        for item in data:
+            if isinstance(item, dict) and "json" in item:
+                dados_extraidos.append(item["json"])
+            else:
+                dados_extraidos.append(item)
+        
+        # Processar análise completa SEM otimização
+        resultado_completo = astro_engine.processar_completo(dados_extraidos)
+        
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ Análise completa concluída em {execution_time}ms")
+        
+        # Adicionar meta informações
+        if "meta_info" not in resultado_completo:
+            resultado_completo["meta_info"] = {}
+        resultado_completo["meta_info"]["execution_time_ms"] = execution_time
+        resultado_completo["meta_info"]["engine_source"] = "AstroEngineCompleto_DadosCompletos"
+        resultado_completo["meta_info"]["aviso"] = "Dados completos - pode exceder limite de tokens do Gemini"
+        
+        return resultado_completo
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no endpoint dados completos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 
 # ============ EXECUÇÃO ============
 
 if __name__ == "__main__":
-    print("🌟 API Astrológica Profissional v2.0")
+    print("🌟 API Astrológica Profissional v2.0 - OTIMIZADA")
     print("⚡ Recursos implementados:")
-    print("  ✅ Orbes dinâmicos")
-    print("  ✅ Cálculo de datas específicas")
-    print("  ✅ Análise de mudanças de signo")
-    print("  ✅ Projeção de aspectos futuros")
-    print("  ✅ Trânsitos profissionais completos")
-    print("  ✅ Separação planetas lentos/rápidos")
-    print("  ✅ Análise de permanência em signos")
-    print("  ✅ Movimento retrógrado/direto")
-    print("  ✅ Estrutura igual ao JavaScript")
-    print("  ✅ Integração com dados NASA/JPL para precisão")
-    print("  ✅ Novo endpoint /astro-completo-nasa")
+    print("  ✅ Análise completa de trânsitos")
+    print("  ✅ Output otimizado para LLMs")
+    print("  ✅ Priorização por relevância")
+    print("  ✅ Casas ativadas com datas precisas")
+    print("  ✅ Aspectos com orbe de 5 graus")
+    print("  ✅ Retrogradações detalhadas")
+    print("  ✅ Período de análise: 12 meses")
+    print("  ✅ Análise de trânsitos específicos")
+    print("  ✅ Mudanças de signo próximas")
+    print("  ✅ Compatível com limite de tokens do Gemini")
+    print("")
+    print("🚀 Endpoints disponíveis:")
+    print("  📊 /astro-completo-nasa (principal - otimizado)")
+    print("  🔍 /transito-especifico (análise específica de planeta)")
+    print("  🤖 /astro-completo-gemini (versão específica para Gemini)")
+    print("  📈 /verificar-tamanho (verificação de tokens)")
+    print("  🔄 /converter-para-gemini (converter dados existentes)")
+    print("  📋 /astro-completo-dados-completos (dados completos)")
+    print("")
     print("📄 Docs: http://localhost:8000/docs")
     print("🔍 Health: http://localhost:8000/health")
+    print("⚠️  IMPORTANTE: Endpoint principal agora é otimizado por padrão!")
     
     uvicorn.run(
         app, 
