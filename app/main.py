@@ -970,7 +970,46 @@ class AstroEngineCompleto:
                 'speed': 1.0
             }
     
-    def calcular_retrogradacoes_nasa_dinamico(self, nome_planeta, data_inicio_str, periodo_meses=12):
+    def _get_daily_position(self, nome_planeta, data_str):
+        """Método auxiliar para obter a posição diária de um planeta usando NASA ou Ephem."""
+        if self.usar_nasa:
+            try:
+                dt = datetime.strptime(data_str, '%Y-%m-%d')
+                t = self.ts.utc(dt.year, dt.month, dt.day)
+                planeta_obj = self.planet_map.get(nome_planeta)
+                if not planeta_obj:
+                    raise ValueError(f"Planeta {nome_planeta} não encontrado para _get_daily_position NASA")
+                astrometric = self.earth.at(t).observe(planeta_obj)
+                ecliptic = astrometric.ecliptic_latlon()
+                longitude = ecliptic[0].degrees
+                if longitude < 0: longitude += 360
+                return longitude
+            except Exception as e:
+                logger.warning(f"Erro em _get_daily_position (NASA) para {nome_planeta} em {data_str}: {e}. Tentando Ephem...")
+                pass # Tentar Ephem como fallback
+        
+        # Fallback para PyEphem
+        try:
+            ephem_map = {
+                'Sol': ephem.Sun(), 'Lua': ephem.Moon(), 'Mercúrio': ephem.Mercury(),
+                'Vênus': ephem.Venus(), 'Marte': ephem.Mars(), 'Júpiter': ephem.Jupiter(),
+                'Saturno': ephem.Saturn(), 'Urano': ephem.Uranus(), 'Netuno': ephem.Neptune(),
+                'Plutão': ephem.Pluto()
+            }
+            planeta = ephem_map.get(nome_planeta)
+            if not planeta:
+                raise ValueError(f"Planeta {nome_planeta} não encontrado para _get_daily_position Ephem")
+            observer = ephem.Observer()
+            observer.date = data_str
+            planeta.compute(observer)
+            longitude_rad = planeta.hlong
+            longitude_graus = float(longitude_rad) * 180 / math.pi
+            return longitude_graus
+        except Exception as e:
+            logger.error(f"Erro final em _get_daily_position para {nome_planeta} em {data_str}: {e}")
+            return None # Retorna None se ambos falharem
+
+    def calcular_retrogradacoes_nasa_dinamico(self, nome_planeta, data_inicio_str, periodo_meses=12, houses_array=None):
         """CÁLCULO DINÂMICO de retrogradações usando NASA - SEM dados hard-coded"""
         if not self.usar_nasa:
             return self.calcular_retrogradacoes_fallback(nome_planeta, data_inicio_str, periodo_meses)
@@ -989,70 +1028,81 @@ class AstroEngineCompleto:
             velocidade_anterior = None
             inicio_retro = None
             em_retrogradacao = False
-            
+            longitude_inicio_retro = None # Novo: armazenar longitude no início da retrogradação
+
             logger.info(f"Calculando retrogradações NASA para {nome_planeta} de {data_inicio_str}")
-            
+
             # Verificar dia por dia
             while data_atual <= dt_fim:
                 try:
                     # Posições para calcular velocidade
                     t_hoje = self.ts.utc(data_atual.year, data_atual.month, data_atual.day)
                     t_amanha = self.ts.utc(data_atual.year, data_atual.month, data_atual.day + 1)
-                    
+
                     # Posições eclípticas
                     pos_hoje = self.earth.at(t_hoje).observe(planeta_obj).ecliptic_latlon()[0].degrees
                     pos_amanha = self.earth.at(t_amanha).observe(planeta_obj).ecliptic_latlon()[0].degrees
-                    
+
                     # Normalizar longitude
                     if pos_hoje < 0: pos_hoje += 360
                     if pos_amanha < 0: pos_amanha += 360
-                    
+
                     # Calcular velocidade diária
                     velocidade = pos_amanha - pos_hoje
                     if velocidade > 180: velocidade -= 360
                     elif velocidade < -180: velocidade += 360
-                    
+
                     # Detectar INÍCIO de retrogradação (velocidade vira negativa)
                     if velocidade < 0 and not em_retrogradacao:
                         inicio_retro = data_atual.strftime('%Y-%m-%d')
                         em_retrogradacao = True
+                        longitude_inicio_retro = pos_hoje # Armazenar longitude no início
                         logger.info(f"{nome_planeta} inicia retrogradação em {inicio_retro}")
-                    
+
                     # Detectar FIM de retrogradação (velocidade vira positiva)
                     elif velocidade >= 0 and em_retrogradacao:
                         fim_retro = data_atual.strftime('%Y-%m-%d')
                         em_retrogradacao = False
-                        
+
                         if inicio_retro:
-                            # Determinar signo da retrogradação
-                            signo_retro = self.obter_signo_por_longitude(pos_hoje)
+                            # Determinar signo da retrogradação (usando longitude do início)
+                            signo_retro = self.obter_signo_por_longitude(longitude_inicio_retro)
                             duracao = (data_atual - datetime.strptime(inicio_retro, '%Y-%m-%d')).days
-                            
+
+                            # Calcular casas ativadas durante a retrogradação
+                            casas_ativadas_retro = []
+                            if houses_array:
+                                casas_ativadas_retro = self.analisar_casas_retrogradacao(
+                                    nome_planeta, inicio_retro, fim_retro, houses_array
+                                )
+
                             retrogradacoes.append({
                                 'inicio': inicio_retro,
                                 'fim': fim_retro,
                                 'duracao_dias': duracao,
                                 'signo_retrogradacao': signo_retro,
                                 'fonte': 'NASA_CALCULADO',
-                                'descricao': f"Durante a retrogradação, {nome_planeta} revisitará graus anteriores e pode intensificar temas relacionados ao signo {signo_retro}"
+                                'descricao': f"Durante a retrogradação, {nome_planeta} revisitará graus anteriores e pode intensificar temas relacionados ao signo {signo_retro}",
+                                'casas_ativadas': casas_ativadas_retro # Adicionar as casas ativadas
                             })
-                            
+
                             logger.info(f"{nome_planeta} termina retrogradação em {fim_retro} (duração: {duracao} dias)")
                             inicio_retro = None
-                    
+                            longitude_inicio_retro = None # Resetar para o próximo período
+
                     velocidade_anterior = velocidade
                     data_atual += timedelta(days=1)
-                    
+
                 except Exception as e:
                     logger.warning(f"Erro ao calcular em {data_atual}: {e}")
                     data_atual += timedelta(days=1)
                     continue
-            
+
             logger.info(f"Encontradas {len(retrogradacoes)} retrogradações para {nome_planeta}")
             return retrogradacoes
-            
+
         except Exception as e:
-            logger.error(f"Erro no cálculo NASA de retrogradações: {e}")
+            logger.error(f"Erro no cálculo NASA de retrogradacões: {e}")
             return self.calcular_retrogradacoes_fallback(nome_planeta, data_inicio_str, periodo_meses)
     
     def obter_signo_por_longitude(self, longitude):
@@ -1101,13 +1151,62 @@ class AstroEngineCompleto:
         logger.warning(f"Usando dados de emergência para {nome_planeta}")
         return retrogradacoes
     
-    def calcular_retrogradacoes(self, planeta, signo_atual, velocidade):
+    def analisar_casas_retrogradacao(self, nome_planeta, inicio_retro_str, fim_retro_str, houses_array):
+        """Analisa as casas por onde o planeta transita durante o período de retrogradação."""
+        if not houses_array:
+            return []
+
+        casas_transito = []
+        data_atual = datetime.strptime(inicio_retro_str, '%Y-%m-%d')
+        data_fim = datetime.strptime(fim_retro_str, '%Y-%m-%d')
+
+        current_house = None
+        current_house_entry_date = None
+
+        while data_atual <= data_fim:
+            longitude = self._get_daily_position(nome_planeta, data_atual.strftime('%Y-%m-%d'))
+            if longitude is None:
+                data_atual += timedelta(days=1)
+                continue
+
+            casa_info = self.determinar_casa(longitude, houses_array)
+
+            if casa_info:
+                casa_num = casa_info['casa']
+                if casa_num != current_house:
+                    # Nova casa ou início do período retrógrado
+                    if current_house is not None:
+                        # Fechar o período da casa anterior
+                        duracao_dias = (data_atual - current_house_entry_date).days
+                        casas_transito.append({
+                            'casa': current_house,
+                            'data_entrada': current_house_entry_date.strftime('%Y-%m-%d'),
+                            'data_saida': (data_atual - timedelta(days=1)).strftime('%Y-%m-%d'),
+                            'duracao_dias': duracao_dias
+                        })
+                    current_house = casa_num
+                    current_house_entry_date = data_atual
+            data_atual += timedelta(days=1)
+
+        # Adicionar a última casa ativa (se houver)
+        if current_house is not None:
+            duracao_dias = (data_fim - current_house_entry_date).days + 1 # +1 para incluir o dia final
+            casas_transito.append({
+                'casa': current_house,
+                'data_entrada': current_house_entry_date.strftime('%Y-%m-%d'),
+                'data_saida': data_fim.strftime('%Y-%m-%d'),
+                'duracao_dias': duracao_dias
+            })
+
+        return casas_transito
+
+    def calcular_retrogradacoes(self, planeta, signo_atual, velocidade, houses_array):
         """Interface compatível com código original - agora usa NASA dinâmico"""
         nome_planeta = planeta.get('name', '')
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
         # Usar cálculo dinâmico NASA
-        return self.calcular_retrogradacoes_nasa_dinamico(nome_planeta, data_hoje, 12)
+        return self.calcular_retrogradacoes_nasa_dinamico(nome_planeta, data_hoje, 12, houses_array)
     
     def analisar_transito_em_signo(self, planeta, signo, grau_inicio, grau_fim, natal, houses_array, dias_ate_entrada):
         """Equivalente exato: analisarTransitoEmSigno()"""
@@ -1304,7 +1403,7 @@ class AstroEngineCompleto:
             )
         
         # Calcular retrogradacoes - usar dados reais
-        retrogradacoes = self.calcular_retrogradacoes(planeta, planeta.get('sign'), velocidade)
+        retrogradacoes = self.calcular_retrogradacoes(planeta, planeta.get('sign'), velocidade, houses_array)
         
         return {
             'planeta': planeta.get('name'),
