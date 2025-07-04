@@ -1957,10 +1957,29 @@ async def root():
                     "Compatível com limite de tokens do Gemini"
                 ]
             },
+            "planetas_individualizados": {
+                "endpoint": "/planetas-individualizados",
+                "método": "POST",
+                "descrição": "Dados organizados por planeta individual - RESPEITANDO limite tokens Gemini",
+                "uso": "Para quando LLM precisa extrair dados de planeta específico",
+                "formato_saida": "planetas['Saturno'] = dados do Saturno",
+                "otimizacoes": [
+                    "Máximo 6 planetas (por relevância)",
+                    "5 aspectos mais importantes por planeta",
+                    "3 casas principais por planeta",
+                    "Estimativa: 150k-250k tokens"
+                ],
+                "funcionalidades": [
+                    "Dados organizados por planeta",
+                    "Fácil extração de informações específicas",
+                    "Aspectos organizados por tipo",
+                    "Status de interpretação incluído"
+                ]
+            },
             "transito_especifico": {
                 "endpoint": "/transito-especifico",
                 "método": "POST",
-                "descrição": "Análise específica de um planeta",
+                "descrição": "Análise específica de um planeta (quando já sabe qual planeta)",
                 "formato": {"planeta": "Saturno", "dados_completos": "{}"},
                 "funcionalidades": [
                     "Casas ativadas com datas exatas",
@@ -2000,7 +2019,8 @@ async def root():
         ],
         "casos_uso": {
             "analise_geral": "Use /astro-completo-nasa",
-            "planeta_especifico": "Use /transito-especifico",
+            "consulta_planeta_especifico": "Use /planetas-individualizados",
+            "planeta_ja_conhecido": "Use /transito-especifico",
             "problemas_tokens": "Use /verificar-tamanho",
             "converter_dados": "Use /converter-para-gemini"
         },
@@ -2479,6 +2499,165 @@ async def astro_completo_dados_completos(data: List[Dict[str, Any]]):
         logger.error(f"❌ Erro no endpoint dados completos: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
+@app.post("/planetas-individualizados")
+async def planetas_individualizados(data: List[Dict[str, Any]]):
+    """
+    Endpoint OTIMIZADO para consultas específicas sobre planetas.
+    Retorna dados organizados por planeta individual, RESPEITANDO limite de tokens do Gemini.
+    Ideal para quando a LLM precisa extrair informações de um planeta específico.
+    """
+    start_time = time.time()
+    try:
+        logger.info(f"🔍 Iniciando análise individualizada com {len(data)} elementos")
+        
+        # Extrair dados do formato N8N
+        dados_extraidos = []
+        for item in data:
+            if isinstance(item, dict) and "json" in item:
+                dados_extraidos.append(item["json"])
+            else:
+                dados_extraidos.append(item)
+        
+        # Processar análise completa
+        resultado_completo = astro_engine.processar_completo(dados_extraidos)
+        
+        # Organizar dados por planeta individual COM LIMITE DE TOKENS
+        planetas_organizados = {}
+        
+        # Ordenar planetas por relevância (priorizar os mais importantes)
+        todos_transitos = resultado_completo.get('todos_transitos', [])
+        todos_transitos.sort(key=lambda x: x.get('relevancia', 0), reverse=True)
+        
+        # LIMITAR a 6 planetas máximo para respeitar tokens
+        transitos_limitados = todos_transitos[:6]
+        
+        for transito in transitos_limitados:
+            planeta_nome = transito.get('planeta')
+            if not planeta_nome:
+                continue
+            
+            # Extrair dados específicos do planeta
+            analise_signo = transito.get('analise_signo_atual', {})
+            casas_ativadas = analise_signo.get('casas_ativadas', [])[:3]  # Máximo 3 casas
+            aspectos_natal = analise_signo.get('aspectos_com_natal', [])
+            retrogradacoes = transito.get('retrogradacoes', [])[:2]  # Máximo 2 retrogradações
+            
+            # Limitar aspectos aos 5 mais importantes
+            aspectos_limitados = sorted(aspectos_natal, key=lambda x: x.get('intensidade', 0), reverse=True)[:5]
+            
+            # Organizar aspectos por tipo (LIMITADO)
+            aspectos_por_tipo = {
+                'conjuncao': [],
+                'trigono': [],
+                'sextil': [],
+                'quadratura': [],
+                'oposicao': []
+            }
+            
+            for aspecto in aspectos_limitados:
+                tipo = aspecto.get('tipo_aspecto', '').lower()
+                if tipo in aspectos_por_tipo:
+                    aspectos_por_tipo[tipo].append({
+                        'planeta_natal': aspecto.get('planeta_natal'),
+                        'casa_natal': aspecto.get('casa_natal'),
+                        'data_inicio': aspecto.get('data_inicio'),
+                        'data_exata': aspecto.get('data_exata'),
+                        'data_fim': aspecto.get('data_fim'),
+                        'intensidade': aspecto.get('intensidade'),
+                        'natureza': aspecto.get('natureza')
+                    })
+            
+            # Organizar dados do planeta (VERSÃO RESUMIDA)
+            planetas_organizados[planeta_nome] = {
+                'info': {
+                    'planeta': planeta_nome,
+                    'signo': transito.get('signo_atual'),
+                    'grau': transito.get('grau_atual'),
+                    'relevancia': transito.get('relevancia'),
+                    'retrogrado': transito.get('eh_retrogrado'),
+                    'tempo_restante': transito.get('tempo_restante_signo', {}).get('dias'),
+                    'data_mudanca': transito.get('tempo_restante_signo', {}).get('data_mudanca'),
+                    'proximo_signo': transito.get('proximo_signo')
+                },
+                
+                'casas': [
+                    {
+                        'num': casa.get('casa'),
+                        'entrada': casa.get('data_entrada'),
+                        'saida': casa.get('data_saida'),
+                        'meses': casa.get('permanencia_meses')
+                    }
+                    for casa in casas_ativadas
+                ],
+                
+                'aspectos': {
+                    'por_tipo': aspectos_por_tipo,
+                    'resumo': {
+                        'total': len(aspectos_limitados),
+                        'harmonicos': len([a for a in aspectos_limitados if a.get('natureza') == 'harmonioso']),
+                        'desafiadores': len([a for a in aspectos_limitados if a.get('natureza') == 'desafiador']),
+                        'intensos': len([a for a in aspectos_limitados if a.get('intensidade', 0) >= 7])
+                    }
+                },
+                
+                'retrogradacoes': [
+                    {
+                        'inicio': retro.get('inicio'),
+                        'fim': retro.get('fim'),
+                        'signo': retro.get('signo_retrogradacao'),
+                        'dias': retro.get('duracao_dias')
+                    }
+                    for retro in retrogradacoes
+                ],
+                
+                'status': {
+                    'relevancia_nivel': 'alta' if transito.get('relevancia', 0) >= 8 else 'media' if transito.get('relevancia', 0) >= 5 else 'baixa',
+                    'muda_signo_breve': transito.get('tempo_restante_signo', {}).get('dias', 999) <= 90,
+                    'tem_aspectos_intensos': len([a for a in aspectos_limitados if a.get('intensidade', 0) >= 7]) > 0,
+                    'retrogradacao_ativa': len(retrogradacoes) > 0,
+                    'multiplas_casas': len(casas_ativadas) > 1
+                }
+            }
+        
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ Análise individualizada concluída em {execution_time}ms")
+        
+        # Resultado final OTIMIZADO para limite de tokens
+        resultado_otimizado = {
+            'planetas': planetas_organizados,
+            
+            'mudancas_proximas': resultado_completo.get('mudancas_signo_proximas', [])[:3],  # Máximo 3
+            
+            'resumo': {
+                'total_planetas': len(planetas_organizados),
+                'alta_relevancia': len([p for p in planetas_organizados.values() if p['status']['relevancia_nivel'] == 'alta']),
+                'com_retrogradacao': len([p for p in planetas_organizados.values() if p['status']['retrogradacao_ativa']]),
+                'mudando_signo': len([p for p in planetas_organizados.values() if p['status']['muda_signo_breve']]),
+                'data_analise': resultado_completo.get('meta_info', {}).get('data_analise')
+            },
+            
+            'como_usar': {
+                'acesso_planeta': 'Use planetas["Saturno"] para dados do Saturno',
+                'aspectos_tipo': 'Use planetas["Saturno"]["aspectos"]["por_tipo"]["conjuncao"]',
+                'info_rapida': 'Use planetas["Saturno"]["status"] para análise rápida'
+            },
+            
+            'meta': {
+                'otimizado_para': 'Consultas específicas + Limite tokens Gemini',
+                'planetas_incluidos': len(planetas_organizados),
+                'planetas_omitidos': len(todos_transitos) - len(planetas_organizados),
+                'criterio_selecao': 'Ordenados por relevância, top 6 planetas',
+                'execution_time_ms': execution_time,
+                'tokens_estimados': 'Aproximadamente 150k-250k tokens'
+            }
+        }
+        
+        return resultado_otimizado
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no endpoint planetas individualizados: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
 
 # ============ EXECUÇÃO ============
 
@@ -2498,7 +2677,8 @@ if __name__ == "__main__":
     print("")
     print("🚀 Endpoints disponíveis:")
     print("  📊 /astro-completo-nasa (principal - otimizado)")
-    print("  🔍 /transito-especifico (análise específica de planeta)")
+    print("  🔍 /planetas-individualizados (IDEAL para consultas específicas)")
+    print("  🎯 /transito-especifico (análise específica quando já sabe o planeta)")
     print("  🤖 /astro-completo-gemini (versão específica para Gemini)")
     print("  📈 /verificar-tamanho (verificação de tokens)")
     print("  🔄 /converter-para-gemini (converter dados existentes)")
@@ -2507,6 +2687,7 @@ if __name__ == "__main__":
     print("📄 Docs: http://localhost:8000/docs")
     print("🔍 Health: http://localhost:8000/health")
     print("⚠️  IMPORTANTE: Endpoint principal agora é otimizado por padrão!")
+    print("💡 NOVO: /planetas-individualizados ideal para consultas específicas!")
     
     uvicorn.run(
         app, 
