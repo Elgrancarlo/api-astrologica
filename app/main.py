@@ -7,6 +7,8 @@ import time
 import logging
 from datetime import datetime, timedelta
 import math
+import traceback
+import os
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +36,7 @@ class Planet(BaseModel):
     fullDegree: float
     normDegree: float
     speed: float
-    isRetro: str
+    isRetro: Union[str, bool]
     sign: str
     house: int
 
@@ -63,6 +65,19 @@ class AspectData(BaseModel):
     data_exata: str
     data_fim: str
 
+class TransitoProfissional(BaseModel):
+    planeta: str
+    casa: int
+    signo: str
+    grau_atual: Optional[str] = None
+    data_entrada: Optional[str] = None
+    data_saida_estimada: Optional[str] = None
+    dias_restantes_casa: Optional[int] = None
+    dias_na_casa: Optional[int] = None
+    dias_ate_entrada: Optional[int] = None
+    status: str
+    relevancia: str
+
 class PlanetaLento(BaseModel):
     planeta: str
     signo: str
@@ -80,19 +95,6 @@ class MudancaSigno(BaseModel):
     data_mudanca: str
     casas_ativadas_novo_signo: List[Dict[str, Any]]
 
-class TransitoProfissional(BaseModel):
-    planeta: str
-    casa: int
-    signo: str
-    grau_atual: Optional[str] = None
-    data_entrada: Optional[str] = None
-    data_saida_estimada: Optional[str] = None
-    dias_restantes_casa: Optional[int] = None
-    dias_na_casa: Optional[int] = None
-    dias_ate_entrada: Optional[int] = None
-    status: str
-    relevancia: str
-
 class AspectoPlanetaRapido(BaseModel):
     planeta_transito: str
     planeta_natal: str
@@ -106,13 +108,71 @@ class AspectoPlanetaRapido(BaseModel):
     orbe: str
     orbe_maximo_usado: int
 
+class PeriodoAnalise(BaseModel):
+    inicio: str
+    fim: str
+    descricao: str
+
+class OrbesAplicados(BaseModel):
+    planetas_pessoais: str
+    planetas_transpessoais: str
+
+class FutureLentoAspect(BaseModel):
+    planeta_natal: str
+    signo_natal: str
+    casa_natal: int
+    data_aproximada: str
+    tipo_aspecto: str
+    natureza: str
+    orbe: str
+    orbe_maximo_usado: int
+    casa_ativada: Optional[int] = None
+
+class ProjectedLentoAspects(BaseModel):
+    planeta: str
+    aspectos_planetas_futuros: List[FutureLentoAspect]
+
+class AnaliseAreaProfissional(BaseModel):
+    transitos_planetas_lentos_casas_2610: List[TransitoProfissional]
+    transitos_rapidos_casas_2610: List[Dict[str, Any]]
+    aspectos_planetas_rapidos_todos: List[AspectoPlanetaRapido]
+    aspectos_planetas_rapidos_harmonicos: List[AspectoPlanetaRapido]
+    aspectos_planetas_lentos_todos_futuros: List[ProjectedLentoAspects]
+    aspectos_planetas_lentos_harmonicos_futuros: List[ProjectedLentoAspects]
+    jupiter_oportunidades: Optional[Dict[str, Any]]
+    periodo_analise: PeriodoAnalise
+
+class MetaInfo(BaseModel):
+    periodo_analise: str
+    num_planetas_analisados: int
+    tipo_analise: str
+    data_analise: str
+    orbes_aplicados: OrbesAplicados
+    execution_time_ms: float
+    engine: str
+    timestamp: float
+    processing_time_ms: Optional[float] = None
+    source: Optional[str] = None
+    input_elements: Optional[int] = None
+
+class AnalysisResponse(BaseModel):
+    tipo_analise: str
+    api_fonte: str
+    planetas_lentos: List[PlanetaLento]
+    mudancas_signo_proximas: List[MudancaSigno]
+    mudancas_casa_proximas: List[Dict[str, Any]]
+    analise_area_profissional: AnaliseAreaProfissional
+    meta_info: MetaInfo
+
 class AnalysisRequest(BaseModel):
     transitos_lentos: List[Planet]
     natal: List[Planet]
     houses: HouseSystem
     transitos_rapidos: Optional[List[Planet]] = []
 
-# ============ CALCULADORA ASTROLÓGICA AVANÇADA ============
+# ============ FIM DOS NOVOS MODELOS ============
+
+# ============ CALCULADORA ASTROLÓGICA AVANÇADA (VERSÃO 2.0) ============
 
 class AdvancedAstroCalculator:
     """Calculadora astrológica completa equivalente ao JavaScript"""
@@ -129,7 +189,7 @@ class AdvancedAstroCalculator:
         self.planetas_transpessoais = ['Jupiter', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutao', 'Plutão']
         self.planetas_lentos = ['Jupiter', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutao', 'Plutão']
         self.planetas_rapidos = ['Sol', 'Mercúrio', 'Vênus', 'Marte']
-        
+         
         # Aspectos principais
         self.aspectos = [
             (0, "conjunção", "harmonioso", 10),
@@ -138,7 +198,7 @@ class AdvancedAstroCalculator:
             (120, "trígono", "harmonioso", 7),
             (180, "oposição", "desafiador", 9)
         ]
-        
+         
         # Velocidades médias diárias (graus/dia)
         self.velocidades_medias = {
             'Sol': 0.98, 'Lua': 13.2, 'Mercúrio': 1.38, 'Vênus': 1.2, 'Marte': 0.52,
@@ -189,7 +249,7 @@ class AdvancedAstroCalculator:
         tipo1 = self.determinar_tipo_planeta(planeta1)
         tipo2 = self.determinar_tipo_planeta(planeta2)
         orbe_maximo = min(tipo1["orbe"], tipo2["orbe"])  # Usar o menor orbe
-        
+         
         # Verificar aspectos
         for angulo_exato, nome_aspecto, natureza, intensidade in self.aspectos:
             orbe_atual = abs(diferenca - angulo_exato)
@@ -276,7 +336,7 @@ class AdvancedAstroCalculator:
         }
     
     def calcular_mudancas_casa_futuras(self, signo_futuro: str, planeta_atual: Planet, 
-                                     cuspides: List[House]) -> List[Dict[str, Any]]:
+                                      cuspides: List[House]) -> List[Dict[str, Any]]:
         """Calcula mudanças de casa para um signo futuro"""
         try:
             index_signo = self.signos.index(signo_futuro)
@@ -328,7 +388,7 @@ class AdvancedAstroCalculator:
         return sorted(casas_ativadas, key=lambda x: x["dias_ate_entrada"])
     
     def analisar_planetas_lentos(self, transitos_lentos: List[Planet], natal: List[Planet], 
-                               cuspides: List[House]) -> List[Dict[str, Any]]:
+                                cuspides: List[House]) -> List[Dict[str, Any]]:
         """Análise completa dos planetas lentos"""
         analise_lentos = []
         mudancas_signo = []
@@ -421,7 +481,7 @@ class AdvancedAstroCalculator:
         """Calcula trânsitos pelas casas profissionais (2, 6, 10)"""
         casas_profissionais = [2, 6, 10]
         transitos_prof = []
-        
+         
         relevancia_map = {
             2: "recursos_financeiros",
             6: "trabalho_rotina", 
@@ -645,6 +705,741 @@ class AdvancedAstroCalculator:
 # Instância global
 calc = AdvancedAstroCalculator()
 
+# ============ ENGINE ASTROLÓGICO COMPLETO (BASEADO NO CÓDIGO JS ORIGINAL COM DADOS NASA/JPL) ============
+# Imports para o AstroEngineCompleto
+from skyfield.api import load, Loader
+import ephem
+import numpy as np
+
+class AstroEngineCompleto:
+    """
+    Engine que substitui EXATAMENTE o código JavaScript
+    Mantém todas as funcionalidades + dados NASA
+    """
+    
+    def __init__(self):
+        try:
+            # Carregar dados NASA/JPL
+            self.loader = Loader('.')
+            self.planets = self.loader('de421.bsp')
+            self.ts = self.loader.timescale()
+            self.earth = self.planets['earth']
+            
+            # Mapeamento planetas (exato do JS)
+            self.planet_map = {
+                'Sol': self.planets['sun'],
+                'Lua': self.planets['moon'], 
+                'Mercúrio': self.planets['mercury'],
+                'Vênus': self.planets['venus'],
+                'Marte': self.planets['mars barycenter'],
+                'Júpiter': self.planets['jupiter barycenter'],
+                'Saturno': self.planets['saturn barycenter'],
+                'Urano': self.planets['uranus barycenter'],
+                'Netuno': self.planets['neptune barycenter'],
+                'Plutão': self.planets['pluto barycenter']
+            }
+            
+            self.signos = ['Áries', 'Touro', 'Gêmeos', 'Câncer', 'Leão', 'Virgem',
+                          'Libra', 'Escorpião', 'Sagitário', 'Capricórnio', 'Aquário', 'Peixes']
+            
+            self.usar_nasa = True
+            logger.info("AstroEngine inicializado com dados NASA/JPL")
+            
+        except Exception as e:
+            logger.error(f"Erro ao carregar NASA: {e}")
+            self.usar_nasa = False
+            logger.warning("Usando dados alternativos")
+    
+    def normalizar_planeta_data(self, data):
+        """Normaliza dados de entrada para formato interno"""
+        # Normalizar isRetro de string para boolean
+        is_retro = data.get('isRetro', 'false')
+        if isinstance(is_retro, str):
+            is_retro_bool = is_retro.lower() == 'true'
+        else:
+            is_retro_bool = bool(is_retro)
+        
+        # Normalizar nomes de signos
+        signo = data.get('sign', 'Áries')
+        signo_normalizado = self.normalizar_signo(signo)
+        
+        # Calcular speed se isRetro for true mas speed for positivo
+        speed = float(data.get('speed', 0))
+        if is_retro_bool and speed >= 0:
+            speed = -abs(speed)
+        
+        return {
+            'name': data.get('name'),
+            'fullDegree': float(data.get('fullDegree', 0)),
+            'normDegree': float(data.get('normDegree', 0)),
+            'speed': speed,
+            'isRetro': is_retro_bool,
+            'sign': signo_normalizado,
+            'house': int(data.get('house', 1))
+        }
+    
+    def normalizar_signo(self, signo):
+        """Normaliza variações de nomes de signos"""
+        normalizacao = {
+            'Gémeos': 'Gêmeos',
+            'Gemeos': 'Gêmeos',
+            'Virgem': 'Virgem',
+            'Escorpião': 'Escorpião',
+            'Escorpiao': 'Escorpião',
+            'Capricórnio': 'Capricórnio',
+            'Capricornio': 'Capricórnio',
+            'Aquário': 'Aquário',
+            'Aquario': 'Aquário'
+        }
+        
+        return normalizacao.get(signo, signo)
+    
+    def calcular_data_futura(self, dias_adicionais):
+        """Equivalente exato: calcularDataFutura()"""
+        hoje = datetime.now()
+        data_futura = hoje + timedelta(days=dias_adicionais)
+        return data_futura.strftime('%Y-%m-%d')
+    
+    def calcular_diferenca(self, grau1, grau2):
+        """Equivalente exato: calcularDiferenca()"""
+        diff = abs(grau1 - grau2)
+        if diff > 180:
+            diff = 360 - diff
+        return diff
+    
+    def identificar_aspecto(self, diferenca):
+        """Equivalente exato: identificarAspecto()"""
+        if diferenca <= 5:
+            return {'nome': 'conjunção', 'orbe': diferenca, 'natureza': 'harmonioso', 'intensidade': 10}
+        if abs(diferenca - 60) <= 5:
+            return {'nome': 'sextil', 'orbe': abs(diferenca - 60), 'natureza': 'harmonioso', 'intensidade': 6}
+        if abs(diferenca - 90) <= 5:
+            return {'nome': 'quadratura', 'orbe': abs(diferenca - 90), 'natureza': 'desafiador', 'intensidade': 8}
+        if abs(diferenca - 120) <= 5:
+            return {'nome': 'trígono', 'orbe': abs(diferenca - 120), 'natureza': 'harmonioso', 'intensidade': 7}
+        if abs(diferenca - 180) <= 5:
+            return {'nome': 'oposição', 'orbe': abs(diferenca - 180), 'natureza': 'desafiador', 'intensidade': 9}
+        return None
+    
+    def encontrar_planeta(self, nome, lista):
+        """Equivalente exato: encontrarPlaneta()"""
+        for p in lista:
+            if p and p.get('name') == nome:
+                return p
+        return None
+    
+    def determinar_casa(self, grau_transito, cuspides_array):
+        """Equivalente exato: determinarCasa()"""
+        if not cuspides_array:
+            return None
+            
+        try:
+            cuspides_ordenadas = sorted(cuspides_array, key=lambda x: x.get('degree', 0))
+            
+            for i in range(len(cuspides_ordenadas)):
+                cuspide_atual = cuspides_ordenadas[i]
+                proxima_cuspide = cuspides_ordenadas[(i + 1) % len(cuspides_ordenadas)]
+                
+                grau_atual = cuspide_atual.get('degree', 0)
+                grau_proximo = proxima_cuspide.get('degree', 0)
+                
+                if grau_proximo > grau_atual:
+                    esta_na_casa = grau_atual <= grau_transito < grau_proximo
+                else:
+                    esta_na_casa = grau_transito >= grau_atual or grau_transito < grau_proximo
+                
+                if esta_na_casa:
+                    return {
+                        'casa': cuspide_atual.get('house', 1),
+                        'cuspide_grau': grau_atual,
+                        'proxima_cuspide': grau_proximo,
+                        'proxima_casa': proxima_cuspide.get('house', 1)
+                    }
+        except:
+            pass
+            
+        return None
+    
+    def obter_posicao_precisa(self, nome_planeta, data_str):
+        """Obtém posição usando NASA ou fallback"""
+        if self.usar_nasa:
+            return self.obter_posicao_nasa(nome_planeta, data_str)
+        else:
+            return self.obter_posicao_ephem(nome_planeta, data_str)
+    
+    def obter_posicao_nasa(self, nome_planeta, data_str):
+        """Posição precisa usando NASA/JPL"""
+        try:
+            dt = datetime.strptime(data_str, '%Y-%m-%d')
+            t = self.ts.utc(dt.year, dt.month, dt.day)
+            
+            planeta_obj = self.planet_map.get(nome_planeta)
+            if not planeta_obj:
+                raise ValueError(f"Planeta {nome_planeta} não encontrado")
+            
+            # Posição hoje
+            astrometric = self.earth.at(t).observe(planeta_obj)
+            ecliptic = astrometric.ecliptic_latlon()
+            longitude_hoje = ecliptic[0].degrees
+            if longitude_hoje < 0:
+                longitude_hoje += 360
+            
+            # Posição amanhã para velocidade
+            t_amanha = self.ts.utc(dt.year, dt.month, dt.day + 1)
+            astrometric_amanha = self.earth.at(t_amanha).observe(planeta_obj)
+            ecliptic_amanha = astrometric_amanha.ecliptic_latlon()
+            longitude_amanha = ecliptic_amanha[0].degrees
+            if longitude_amanha < 0:
+                longitude_amanha += 360
+            
+            # Calcular velocidade
+            velocidade = longitude_amanha - longitude_hoje
+            if velocidade > 180:
+                velocidade -= 360
+            elif velocidade < -180:
+                velocidade += 360
+            
+            # Determinar signo
+            signo_index = int(longitude_hoje // 30)
+            grau_no_signo = longitude_hoje % 30
+            
+            return {
+                'name': nome_planeta,
+                'sign': self.signos[signo_index],
+                'normDegree': grau_no_signo,
+                'fullDegree': longitude_hoje,
+                'speed': velocidade
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro NASA para {nome_planeta}: {e}")
+            return self.obter_posicao_ephem(nome_planeta, data_str)
+    
+    def obter_posicao_ephem(self, nome_planeta, data_str):
+        """Fallback usando PyEphem"""
+        try:
+            ephem_map = {
+                'Sol': ephem.Sun(),
+                'Lua': ephem.Moon(),
+                'Mercúrio': ephem.Mercury(),
+                'Vênus': ephem.Venus(),
+                'Marte': ephem.Mars(),
+                'Júpiter': ephem.Jupiter(),
+                'Saturno': ephem.Saturn(),
+                'Urano': ephem.Uranus(),
+                'Netuno': ephem.Neptune(),
+                'Plutão': ephem.Pluto()
+            }
+            
+            planeta = ephem_map.get(nome_planeta)
+            if not planeta:
+                raise ValueError(f"Planeta {nome_planeta} não encontrado")
+            
+            observer = ephem.Observer()
+            observer.date = data_str
+            planeta.compute(observer)
+            
+            longitude_rad = planeta.hlong
+            longitude_graus = float(longitude_rad) * 180 / math.pi
+            
+            signo_index = int(longitude_graus // 30)
+            grau_no_signo = longitude_graus % 30
+            
+            return {
+                'name': nome_planeta,
+                'sign': self.signos[signo_index],
+                'normDegree': grau_no_signo,
+                'fullDegree': longitude_graus,
+                'speed': 1.0
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro Ephem para {nome_planeta}: {e}")
+            return {
+                'name': nome_planeta,
+                'sign': 'Áries',
+                'normDegree': 0,
+                'fullDegree': 0,
+                'speed': 1.0
+            }
+    
+    def calcular_retrogradacoes_nasa_dinamico(self, nome_planeta, data_inicio_str, periodo_meses=12):
+        """CÁLCULO DINÂMICO de retrogradações usando NASA - SEM dados hard-coded"""
+        if not self.usar_nasa:
+            return self.calcular_retrogradacoes_fallback(nome_planeta, data_inicio_str, periodo_meses)
+        
+        try:
+            planeta_obj = self.planet_map.get(nome_planeta)
+            if not planeta_obj:
+                return []
+            
+            # Período de análise
+            dt_inicio = datetime.strptime(data_inicio_str, '%Y-%m-%d')
+            dt_fim = dt_inicio + timedelta(days=periodo_meses * 30)
+            
+            retrogradacoes = []
+            data_atual = dt_inicio
+            velocidade_anterior = None
+            inicio_retro = None
+            em_retrogradacao = False
+            
+            logger.info(f"Calculando retrogradações NASA para {nome_planeta} de {data_inicio_str}")
+            
+            # Verificar dia por dia
+            while data_atual <= dt_fim:
+                try:
+                    # Posições para calcular velocidade
+                    t_hoje = self.ts.utc(data_atual.year, data_atual.month, data_atual.day)
+                    t_amanha = self.ts.utc(data_atual.year, data_atual.month, data_atual.day + 1)
+                    
+                    # Posições eclípticas
+                    pos_hoje = self.earth.at(t_hoje).observe(planeta_obj).ecliptic_latlon()[0].degrees
+                    pos_amanha = self.earth.at(t_amanha).observe(planeta_obj).ecliptic_latlon()[0].degrees
+                    
+                    # Normalizar longitude
+                    if pos_hoje < 0: pos_hoje += 360
+                    if pos_amanha < 0: pos_amanha += 360
+                    
+                    # Calcular velocidade diária
+                    velocidade = pos_amanha - pos_hoje
+                    if velocidade > 180: velocidade -= 360
+                    elif velocidade < -180: velocidade += 360
+                    
+                    # Detectar INÍCIO de retrogradação (velocidade vira negativa)
+                    if velocidade < 0 and not em_retrogradacao:
+                        inicio_retro = data_atual.strftime('%Y-%m-%d')
+                        em_retrogradacao = True
+                        logger.info(f"{nome_planeta} inicia retrogradação em {inicio_retro}")
+                    
+                    # Detectar FIM de retrogradação (velocidade vira positiva)
+                    elif velocidade >= 0 and em_retrogradacao:
+                        fim_retro = data_atual.strftime('%Y-%m-%d')
+                        em_retrogradacao = False
+                        
+                        if inicio_retro:
+                            # Determinar signo da retrogradação
+                            signo_retro = self.obter_signo_por_longitude(pos_hoje)
+                            duracao = (data_atual - datetime.strptime(inicio_retro, '%Y-%m-%d')).days
+                            
+                            retrogradacoes.append({
+                                'inicio': inicio_retro,
+                                'fim': fim_retro,
+                                'duracao_dias': duracao,
+                                'signo_retrogradacao': signo_retro,
+                                'fonte': 'NASA_CALCULADO',
+                                'descricao': f"Durante a retrogradação, {nome_planeta} revisitará graus anteriores e pode intensificar temas relacionados ao signo {signo_retro}"
+                            })
+                            
+                            logger.info(f"{nome_planeta} termina retrogradação em {fim_retro} (duração: {duracao} dias)")
+                            inicio_retro = None
+                    
+                    velocidade_anterior = velocidade
+                    data_atual += timedelta(days=1)
+                    
+                except Exception as e:
+                    logger.warning(f"Erro ao calcular em {data_atual}: {e}")
+                    data_atual += timedelta(days=1)
+                    continue
+            
+            logger.info(f"Encontradas {len(retrogradacoes)} retrogradações para {nome_planeta}")
+            return retrogradacoes
+            
+        except Exception as e:
+            logger.error(f"Erro no cálculo NASA de retrogradações: {e}")
+            return self.calcular_retrogradacoes_fallback(nome_planeta, data_inicio_str, periodo_meses)
+    
+    def obter_signo_por_longitude(self, longitude):
+        """Converte longitude eclíptica para signo"""
+        signo_index = int(longitude // 30)
+        return self.signos[signo_index % 12]
+    
+    def calcular_retrogradacoes_fallback(self, nome_planeta, data_inicio_str, periodo_meses):
+        """Fallback com dados conhecidos apenas se NASA falhar"""
+        # Dados de emergência apenas para 2025-2026
+        dados_emergencia = {
+            'Mercúrio': [
+                {'inicio': '2025-03-15', 'fim': '2025-04-07', 'signo': 'Áries'},
+                {'inicio': '2025-07-18', 'fim': '2025-08-11', 'signo': 'Leão'},
+                {'inicio': '2025-11-09', 'fim': '2025-11-29', 'signo': 'Sagitário'}
+            ],
+            'Vênus': [{'inicio': '2025-07-26', 'fim': '2025-09-06', 'signo': 'Virgem'}],
+            'Marte': [{'inicio': '2025-12-06', 'fim': '2026-02-24', 'signo': 'Leão'}],
+            'Júpiter': [{'inicio': '2025-05-09', 'fim': '2025-09-11', 'signo': 'Gêmeos'}],
+            'Saturno': [{'inicio': '2025-05-24', 'fim': '2025-10-15', 'signo': 'Peixes'}],
+            'Urano': [{'inicio': '2025-09-01', 'fim': '2026-01-30', 'signo': 'Touro'}],
+            'Netuno': [{'inicio': '2025-07-02', 'fim': '2025-12-07', 'signo': 'Peixes'}],
+            'Plutão': [{'inicio': '2025-05-04', 'fim': '2025-10-11', 'signo': 'Aquário'}]
+        }
+        
+        retrogradacoes = []
+        retros_planeta = dados_emergencia.get(nome_planeta, [])
+        
+        dt_inicio = datetime.strptime(data_inicio_str, '%Y-%m-%d')
+        dt_fim = dt_inicio + timedelta(days=periodo_meses * 30)
+        
+        for retro in retros_planeta:
+            dt_retro_inicio = datetime.strptime(retro['inicio'], '%Y-%m-%d')
+            dt_retro_fim = datetime.strptime(retro['fim'], '%Y-%m-%d')
+            
+            if dt_retro_inicio <= dt_fim and dt_retro_fim >= dt_inicio:
+                retrogradacoes.append({
+                    'inicio': retro['inicio'],
+                    'fim': retro['fim'],
+                    'duracao_dias': (dt_retro_fim - dt_retro_inicio).days,
+                    'signo_retrogradacao': retro['signo'],
+                    'fonte': 'DADOS_EMERGENCIA',
+                    'descricao': f"Durante a retrogradação, {nome_planeta} revisitará graus anteriores e pode intensificar temas relacionados ao signo {retro['signo']}"
+                })
+        
+        logger.warning(f"Usando dados de emergência para {nome_planeta}")
+        return retrogradacoes
+    
+    def calcular_retrogradacoes(self, planeta, signo_atual, velocidade):
+        """Interface compatível com código original - agora usa NASA dinâmico"""
+        nome_planeta = planeta.get('name', '')
+        data_hoje = datetime.now().strftime('%Y-%m-%d')
+        
+        # Usar cálculo dinâmico NASA
+        return self.calcular_retrogradacoes_nasa_dinamico(nome_planeta, data_hoje, 12)
+    
+    def analisar_transito_em_signo(self, planeta, signo, grau_inicio, grau_fim, natal, houses_array, dias_ate_entrada):
+        """Equivalente exato: analisarTransitoEmSigno()"""
+        velocidade = abs(float(planeta.get('speed', 0.1)))
+        if velocidade == 0:
+            velocidade = 0.1
+        
+        # CASAS ATIVADAS
+        casas_ativadas = []
+        casas_vistas = set()
+        
+        for grau in range(int(grau_inicio), int(grau_fim), 3):
+            casa = self.determinar_casa(grau, houses_array)
+            if casa and casa['casa'] not in casas_vistas:
+                casas_vistas.add(casa['casa'])
+                
+                # Calcular timing da casa
+                grau_entrada_casa = grau
+                grau_saida_casa = grau
+                
+                # Buscar limites da casa
+                while grau_entrada_casa > grau_inicio:
+                    casa_anterior = self.determinar_casa(grau_entrada_casa - 1, houses_array)
+                    if casa_anterior and casa_anterior['casa'] != casa['casa']:
+                        break
+                    grau_entrada_casa -= 1
+                
+                while grau_saida_casa < grau_fim - 1:
+                    casa_posterior = self.determinar_casa(grau_saida_casa + 1, houses_array)
+                    if casa_posterior and casa_posterior['casa'] != casa['casa']:
+                        break
+                    grau_saida_casa += 1
+                
+                dias_ate_entrada_casa = dias_ate_entrada + math.ceil((grau_entrada_casa - grau_inicio) / velocidade)
+                dias_na_casa = math.ceil((grau_saida_casa - grau_entrada_casa) / velocidade)
+                
+                casas_ativadas.append({
+                    'casa': casa['casa'],
+                    'data_entrada': self.calcular_data_futura(dias_ate_entrada_casa),
+                    'data_saida': self.calcular_data_futura(dias_ate_entrada_casa + dias_na_casa),
+                    'permanencia_meses': round(dias_na_casa / 30, 1),
+                    'grau_entrada': round(grau_entrada_casa, 1),
+                    'grau_saida': round(grau_saida_casa, 1)
+                })
+        
+        # ASPECTOS COM PLANETAS NATAIS
+        aspectos_com_natal = []
+        
+        # Verificar aspectos em pontos-chave do signo (0°, 10°, 20°) - EXATO DO JS
+        graus_chave = [0, 10, 20]
+        
+        for grau_relativo in graus_chave:
+            grau_absoluto = grau_inicio + grau_relativo
+            dias_ate_grau = dias_ate_entrada + math.ceil(grau_relativo / velocidade)
+            
+            for planeta_natal in natal:
+                if not planeta_natal or not planeta_natal.get('name'):
+                    continue
+                
+                diferenca = self.calcular_diferenca(grau_absoluto, planeta_natal.get('fullDegree', 0))
+                aspecto = self.identificar_aspecto(diferenca)
+                
+                if aspecto and aspecto['orbe'] <= 5:
+                    dias_orbe = math.ceil(5 / velocidade)
+                    
+                    aspectos_com_natal.append({
+                        'planeta_natal': planeta_natal.get('name'),
+                        'signo_natal': planeta_natal.get('sign'),
+                        'casa_natal': planeta_natal.get('house'),
+                        'tipo_aspecto': aspecto['nome'],
+                        'natureza': aspecto['natureza'],
+                        'intensidade': aspecto['intensidade'],
+                        'grau_aspecto': grau_relativo,
+                        'data_inicio': self.calcular_data_futura(dias_ate_grau - dias_orbe),
+                        'data_exata': self.calcular_data_futura(dias_ate_grau),
+                        'data_fim': self.calcular_data_futura(dias_ate_grau + dias_orbe),
+                        'orbe': round(aspecto['orbe'], 1),
+                        'casa_ativada': self.determinar_casa(grau_absoluto, houses_array)['casa'] if self.determinar_casa(grau_absoluto, houses_array) else None
+                    })
+        
+        # Ordenar aspectos por data
+        aspectos_com_natal.sort(key=lambda x: datetime.strptime(x['data_exata'], '%Y-%m-%d'))
+        
+        return {
+            'signo': signo,
+            'casas_ativadas': casas_ativadas,
+            'aspectos_com_natal': aspectos_com_natal,
+            'resumo': {
+                'total_casas': len(casas_ativadas),
+                'total_aspectos': len(aspectos_com_natal),
+                'aspectos_harmonicos': len([a for a in aspectos_com_natal if a['natureza'] == 'harmonioso']),
+                'aspectos_desafiadores': len([a for a in aspectos_com_natal if a['natureza'] == 'desafiador'])
+            }
+        }
+    
+    def calcular_relevancia(self, planeta, analise_atual, analise_proximo):
+        """Equivalente exato: calcularRelevancia()"""
+        pontuacao = 0
+        
+        # Pontuação base por planeta - EXATA DO JS
+        pontuacao_base = {
+            'Júpiter': 9,
+            'Saturno': 8,
+            'Urano': 6,
+            'Netuno': 4,
+            'Plutão': 7,
+            'Marte': 5,
+            'Vênus': 4,
+            'Mercúrio': 3
+        }
+        
+        pontuacao += pontuacao_base.get(planeta.get('name', ''), 3)
+        
+        # Bonus por aspectos
+        if analise_atual:
+            pontuacao += len(analise_atual['aspectos_com_natal']) * 2
+            pontuacao += len([a for a in analise_atual['aspectos_com_natal'] if a['intensidade'] >= 8]) * 3
+        
+        if analise_proximo:
+            pontuacao += len(analise_proximo['aspectos_com_natal']) * 1.5
+        
+        # Bonus por retrogradação
+        if float(planeta.get('speed', 0)) < 0:
+            pontuacao += 3
+        
+        return round(pontuacao)
+    
+    def analisar_transito_planeta(self, planeta, natal, houses_array):
+        """Equivalente exato: analisarTransitoPlaneta()"""
+        logger.info(f"Analisando trânsito de {planeta.get('name')} em {planeta.get('sign')}")
+        
+        # Obter posição atual precisa (NASA se disponível, senão usar dados do input)
+        if self.usar_nasa:
+            try:
+                data_hoje = datetime.now().strftime('%Y-%m-%d')
+                posicao_precisa = self.obter_posicao_nasa(planeta.get('name'), data_hoje)
+                # Atualizar dados do planeta com posição precisa
+                planeta.update(posicao_precisa)
+            except:
+                pass  # Usa dados originais se NASA falhar
+        
+        velocidade = abs(float(planeta.get('speed', 0.1)))
+        if velocidade == 0:
+            velocidade = 0.1
+        eh_retrogrado = float(planeta.get('speed', 0)) < 0
+        
+        # Calcular signo atual e próximo - EXATO DO JS
+        index_signo_atual = self.signos.index(planeta.get('sign', 'Áries'))
+        proximo_signo = self.signos[(index_signo_atual + 1) % 12]
+        signo_anterior = self.signos[(index_signo_atual - 1 + 12) % 12]
+        
+        # Graus do signo atual
+        grau_inicio_signo_atual = index_signo_atual * 30
+        grau_fim_signo_atual = grau_inicio_signo_atual + 30
+        
+        # Calcular tempo restante no signo atual - EXATO DO JS
+        graus_restantes = planeta.get('normDegree', 0) if eh_retrogrado else (30 - planeta.get('normDegree', 0))
+        dias_restantes_signo = math.ceil(graus_restantes / velocidade)
+        
+        # ANÁLISE DO SIGNO ATUAL
+        analise_signo_atual = self.analisar_transito_em_signo(
+            planeta, planeta.get('sign'), grau_inicio_signo_atual, grau_fim_signo_atual,
+            natal, houses_array, 0  # Já está no signo
+        )
+        
+        # ANÁLISE DO PRÓXIMO SIGNO (se vai entrar em menos de 12 meses)
+        analise_proximo_signo = None
+        if dias_restantes_signo < 365 and not eh_retrogrado:
+            grau_inicio_proximo_signo = ((index_signo_atual + 1) % 12) * 30
+            grau_fim_proximo_signo = grau_inicio_proximo_signo + 30
+            
+            analise_proximo_signo = self.analisar_transito_em_signo(
+                planeta, proximo_signo, grau_inicio_proximo_signo, grau_fim_proximo_signo,
+                natal, houses_array, dias_restantes_signo
+            )
+        
+        # Calcular retrogradacoes
+        retrogradacoes = self.calcular_retrogradacoes(planeta, planeta.get('sign'), velocidade)
+        
+        return {
+            'planeta': planeta.get('name'),
+            'signo_atual': planeta.get('sign'),
+            'grau_atual': round(planeta.get('normDegree', 0), 1),
+            'velocidade_diaria': round(velocidade, 4),
+            'eh_retrogrado': eh_retrogrado,
+            
+            'tempo_restante_signo': {
+                'dias': dias_restantes_signo,
+                'meses': round(dias_restantes_signo / 30, 1),
+                'data_mudanca': self.calcular_data_futura(dias_restantes_signo)
+            },
+            
+            'proximo_signo': signo_anterior if eh_retrogrado else proximo_signo,
+            
+            'analise_signo_atual': analise_signo_atual,
+            'analise_proximo_signo': analise_proximo_signo,
+            
+            'retrogradacoes': retrogradacoes,
+            
+            'relevancia': self.calcular_relevancia(planeta, analise_signo_atual, analise_proximo_signo)
+        }
+    
+    def processar_completo(self, dados_entrada):
+        """Equivalente exato: main() - Função principal do JS"""
+        logger.info('Iniciando processamento completo')
+        
+        # Dados chegam como array linear - EXATO DO JS
+        if isinstance(dados_entrada, list):
+            inputs = dados_entrada
+        else:
+            # Fallback se chegarem em formato objeto
+            inputs = dados_entrada.get('inputs', [])
+        
+        logger.info(f'Total de inputs recebidos: {len(inputs)}')
+        
+        # Separar dados conforme estrutura fixa - EXATO DO JS
+        transitos_atuais = []
+        natal = []
+        cuspides = None
+        
+        for index, data in enumerate(inputs):
+            # Pular dados vazios
+            if not data:
+                continue
+                
+            if index < 11:
+                # Primeiros 11: Trânsitos Atuais
+                if data.get('name') and data.get('sign'):
+                    # Normalizar dados
+                    planeta_normalizado = self.normalizar_planeta_data(data)
+                    transitos_atuais.append(planeta_normalizado)
+                    logger.info(f'Trânsito {index}: {data.get("name")} em {data.get("sign")} (grau {data.get("normDegree", 0):.1f})')
+                    
+            elif index < 22:
+                # Próximos 11: Natal
+                if data.get('name') and data.get('sign'):
+                    planeta_normalizado = self.normalizar_planeta_data(data)
+                    natal.append(planeta_normalizado)
+                    logger.info(f'Natal {index - 11}: {data.get("name")} em {data.get("sign")}, casa {data.get("house", 1)}')
+                    
+            elif index == 22:
+                # Índice 22: Cúspides
+                if data.get('houses'):
+                    cuspides = data
+                    logger.info(f"✅ {len(data.get('houses', []))} casas processadas")
+        
+        # Validações - EXATAS DO JS
+        if not cuspides or not cuspides.get('houses'):
+            return {'erro': "Cúspides não encontradas nos inputs"}
+        
+        if not transitos_atuais:
+            return {'erro': "Nenhum trânsito encontrado nos inputs"}
+        
+        houses_array = cuspides.get('houses', [])
+        
+        # ANALISAR TODOS OS PLANETAS RELEVANTES - EXATO DO JS
+        planetas_relevantes = ['Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutão', 'Marte', 'Vênus', 'Mercúrio']
+        analise_completa = []
+        
+        for nome_planeta in planetas_relevantes:
+            planeta = self.encontrar_planeta(nome_planeta, transitos_atuais)
+            
+            if planeta:
+                logger.info(f"Processando {nome_planeta}...")
+                
+                try:
+                    analise = self.analisar_transito_planeta(planeta, natal, houses_array)
+                    analise_completa.append(analise)
+                    
+                    logger.info(f"{nome_planeta}: Relevância {analise['relevancia']}, {analise['analise_signo_atual']['resumo']['total_aspectos']} aspectos")
+                except Exception as error:
+                    logger.error(f"Erro ao analisar {nome_planeta}: {error}")
+        
+        # Ordenar por relevância - EXATO DO JS
+        analise_completa.sort(key=lambda x: x['relevancia'], reverse=True)
+        
+        # Identificar trânsitos em destaque - EXATO DO JS
+        transitos_destaque = [
+            t for t in analise_completa 
+            if (t['relevancia'] >= 8 or 
+                t['analise_signo_atual']['resumo']['total_aspectos'] >= 3 or 
+                t['tempo_restante_signo']['dias'] <= 90)
+        ]
+        
+        logger.info(f"Análise concluída: {len(analise_completa)} planetas, {len(transitos_destaque)} em destaque")
+        
+        # Retorno IDÊNTICO ao JavaScript
+        return {
+            'tipo_analise': "transitos_especificos_completo",
+            
+            # TODOS OS TRÂNSITOS ANALISADOS
+            'todos_transitos': analise_completa,
+            
+            # TRÂNSITOS EM DESTAQUE (para IA priorizar)
+            'transitos_destaque': transitos_destaque,
+            
+            # PLANETA MAIS RELEVANTE
+            'planeta_principal': analise_completa[0] if analise_completa else None,
+            
+            # MUDANÇAS DE SIGNO PRÓXIMAS
+            'mudancas_signo_proximas': [
+                {
+                    'planeta': t['planeta'],
+                    'signo_atual': t['signo_atual'],
+                    'proximo_signo': t['proximo_signo'],
+                    'data_mudanca': t['tempo_restante_signo']['data_mudanca'],
+                    'dias_restantes': t['tempo_restante_signo']['dias']
+                }
+                for t in analise_completa 
+                if t['tempo_restante_signo']['dias'] <= 180
+            ],
+            
+            # RETROGRADAÇÕES ATIVAS
+            'retrogradacoes_periodo': [
+                {
+                    'planeta': t['planeta'],
+                    'retrogradacoes': t['retrogradacoes']
+                }
+                for t in analise_completa 
+                if t['retrogradacoes']
+            ],
+            
+            # METADADOS
+            'meta_info': {
+                'total_planetas_analisados': len(analise_completa),
+                'periodo_analise': "12 meses",
+                'data_analise': datetime.now().strftime('%Y-%m-%d'),
+                'planetas_com_aspectos': len([
+                    t for t in analise_completa 
+                    if t['analise_signo_atual']['resumo']['total_aspectos'] > 0
+                ]),
+                'fonte_dados': 'NASA_JPL' if self.usar_nasa else 'ALTERNATIVO',
+                'precisao_melhorada': True
+            }
+        }
+
+# Instância global para o novo motor
+astro_engine = AstroEngineCompleto()
+
 # ============ ENDPOINTS ============
 
 @app.get("/")
@@ -673,7 +1468,7 @@ async def health_check():
         "features_count": 15
     }
 
-@app.post("/analyze-professional")
+@app.post("/analyze-professional", response_model=AnalysisResponse)
 async def analyze_professional_area(request: AnalysisRequest):
     """Endpoint principal - Análise completa da área profissional"""
     start_time = time.time()
@@ -775,7 +1570,7 @@ async def test_connection(data: Dict[str, Any]):
         "timestamp": time.time(),
         "version": "2.0.0"
     }
-
+    
 @app.post("/analyze-real-data")
 async def analyze_real_data(data: List[Dict[str, Any]]):
     """Endpoint principal para análise de dados reais no formato array"""
@@ -841,14 +1636,14 @@ async def analyze_real_data(data: List[Dict[str, Any]]):
         
         # 6. Criar request e chamar análise
         logger.info("🚀 Executando análise completa...")
-        request = AnalysisRequest(
+        request_obj = AnalysisRequest(
             transitos_lentos=transitos_lentos,
             natal=natal,
             houses=houses,
             transitos_rapidos=transitos_rapidos
         )
         
-        resultado = await analyze_professional_area(request)
+        resultado = await analyze_professional_area(request_obj)
         
         processing_time = round((time.time() - start_time) * 1000, 2)
         logger.info(f"🎉 Análise REAL concluída em {processing_time}ms")
@@ -865,6 +1660,32 @@ async def analyze_real_data(data: List[Dict[str, Any]]):
         logger.error(f"💥 {error_msg}")
         raise HTTPException(status_code=400, detail=error_msg)
 
+@app.post("/astro-completo-nasa")
+async def astro_completo_nasa(data: List[Dict[str, Any]]):
+    """
+    Endpoint para a análise astrológica completa com dados NASA/JPL.
+    Recebe array linear como no N8N original do código JS.
+    """
+    start_time = time.time()
+    try:
+        logger.info(f"🚀 Iniciando análise astro-completo-nasa com {len(data)} elementos")
+        resultado = astro_engine.processar_completo(data)
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ Análise astro-completo-nasa concluída em {execution_time}ms")
+        
+        # Adicionar meta informações de tempo
+        if "meta_info" not in resultado:
+            resultado["meta_info"] = {}
+        resultado["meta_info"]["execution_time_ms"] = execution_time
+        resultado["meta_info"]["engine_source"] = "AstroEngineCompleto_NASA"
+
+        return resultado
+    except Exception as e:
+        logger.error(f"❌ Erro no endpoint /astro-completo-nasa: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Erro interno no Astro Completo: {str(e)}")
+
+
 # ============ EXECUÇÃO ============
 
 if __name__ == "__main__":
@@ -879,6 +1700,8 @@ if __name__ == "__main__":
     print("  ✅ Análise de permanência em signos")
     print("  ✅ Movimento retrógrado/direto")
     print("  ✅ Estrutura igual ao JavaScript")
+    print("  ✅ Integração com dados NASA/JPL para precisão")
+    print("  ✅ Novo endpoint /astro-completo-nasa")
     print("📄 Docs: http://localhost:8000/docs")
     print("🔍 Health: http://localhost:8000/health")
     
