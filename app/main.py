@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import math
 import traceback
 import os
+import unicodedata
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -263,14 +264,20 @@ class AdvancedAstroCalculator:
                 }
         return None
     
-    def encontrar_planeta(self, nome: str, lista: List[Planet]) -> Optional[Planet]:
-        """Busca planeta na lista com ou sem acento"""
-        nome_normalizado = nome.lower().replace('ú', 'u').replace('ã', 'a')
+    def encontrar_planeta(self, nome: str, lista: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Busca planeta na lista com normalização de nomes, equivalente ao JS."""
+        nome_normalizado_search = unicodedata.normalize("NFD", nome).encode("ascii", "ignore").decode("utf-8")
         
-        for planeta in lista:
-            planeta_nome = planeta.name.lower().replace('ú', 'u').replace('ã', 'a')
-            if planeta_nome == nome_normalizado:
-                return planeta
+        for p in lista:
+            if not p or not p.get('name'):
+                continue
+            
+            planeta_nome_na_lista = p.get('name')
+            planeta_nome_normalizado_na_lista = unicodedata.normalize("NFD", planeta_nome_na_lista).encode("ascii", "ignore").decode("utf-8")
+            
+            if (planeta_nome_na_lista == nome or 
+                planeta_nome_normalizado_na_lista == nome_normalizado_search):
+                return p
         return None
     
     def determinar_casa(self, grau_transito: float, cuspides: List[House]) -> Optional[Dict[str, Any]]:
@@ -1351,7 +1358,7 @@ class AstroEngineCompleto:
                     # Normalizar dados
                     planeta_normalizado = self.normalizar_planeta_data(data)
                     transitos_atuais.append(planeta_normalizado)
-                    logger.info(f'Trânsito {index}: {data.get("name")} em {data.get("sign")} (grau {data.get("normDegree", 0):.1f})')
+                    logger.info(f'Trânsito {index}: {data.get("name")} em {data.get("sign")} (grau {data.get("normDegree", 0):.1f}) - Normalized: {planeta_normalizado.get("name", "N/A")}')
                     
             elif index < 22:
                 # Próximos 11: Natal
@@ -1380,18 +1387,20 @@ class AstroEngineCompleto:
         analise_completa = []
         
         for nome_planeta in planetas_relevantes:
+            logger.info(f"Searching for relevant planet: {nome_planeta}")
             planeta = self.encontrar_planeta(nome_planeta, transitos_atuais)
-            
+
             if planeta:
-                logger.info(f"Processando {nome_planeta}...")
-                
+                logger.info(f"Found {nome_planeta}. Processing...")
                 try:
                     analise = self.analisar_transito_planeta(planeta, natal, houses_array)
                     analise_completa.append(analise)
-                    
+
                     logger.info(f"{nome_planeta}: Relevância {analise['relevancia']}, {analise['analise_signo_atual']['resumo']['total_aspectos']} aspectos")
                 except Exception as error:
                     logger.error(f"Erro ao analisar {nome_planeta}: {error}")
+            else:
+                logger.warning(f"Relevant planet {nome_planeta} NOT found in transitos_atuais.")
         
         # Ordenar por relevância - EXATO DO JS
         analise_completa.sort(key=lambda x: x['relevancia'], reverse=True)
