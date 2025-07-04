@@ -1229,26 +1229,31 @@ class AstroEngineCompleto:
         return round(pontuacao)
     
     def analisar_transito_planeta(self, planeta, natal, houses_array):
-        """Equivalente exato: analisarTransitoPlaneta()"""
+        """Equivalente exato: analisarTransitoPlaneta() - CORRIGIDO"""
         logger.info(f"Analisando trânsito de {planeta.get('name')} em {planeta.get('sign')}")
         
-        # Obter posição atual precisa (NASA se disponível, senão usar dados do input)
-        if self.usar_nasa:
-            try:
-                data_hoje = datetime.now().strftime('%Y-%m-%d')
-                posicao_precisa = self.obter_posicao_nasa(planeta.get('name'), data_hoje)
-                # Atualizar dados do planeta com posição precisa
-                planeta.update(posicao_precisa)
-            except:
-                pass  # Usa dados originais se NASA falhar
+        # USAR DADOS DE ENTRADA DIRETAMENTE (não recalcular NASA)
+        # Os dados de entrada já estão corretos e atualizados
         
         velocidade = abs(float(planeta.get('speed', 0.1)))
         if velocidade == 0:
-            velocidade = 0.1
+            # Velocidades padrão realistas por planeta
+            velocidades_padrao = {
+                'Sol': 0.98, 'Lua': 12.0, 'Mercúrio': 1.5, 'Vênus': 1.2,
+                'Marte': 0.6, 'Júpiter': 0.15, 'Saturno': 0.08, 
+                'Urano': 0.04, 'Netuno': 0.02, 'Plutão': 0.01
+            }
+            velocidade = velocidades_padrao.get(planeta.get('name'), 0.1)
+        
         eh_retrogrado = float(planeta.get('speed', 0)) < 0
         
-        # Calcular signo atual e próximo - EXATO DO JS
-        index_signo_atual = self.signos.index(planeta.get('sign', 'Áries'))
+        # Calcular signo atual e próximo - USAR DADOS REAIS DE ENTRADA
+        try:
+            index_signo_atual = self.signos.index(planeta.get('sign', 'Áries'))
+        except ValueError:
+            # Se signo não encontrado, usar Áries como padrão
+            index_signo_atual = 0
+            
         proximo_signo = self.signos[(index_signo_atual + 1) % 12]
         signo_anterior = self.signos[(index_signo_atual - 1 + 12) % 12]
         
@@ -1256,28 +1261,42 @@ class AstroEngineCompleto:
         grau_inicio_signo_atual = index_signo_atual * 30
         grau_fim_signo_atual = grau_inicio_signo_atual + 30
         
-        # Calcular tempo restante no signo atual - EXATO DO JS
-        graus_restantes = planeta.get('normDegree', 0) if eh_retrogrado else (30 - planeta.get('normDegree', 0))
+        # Calcular tempo restante no signo atual - REALISTICAMENTE
+        grau_atual = planeta.get('normDegree', 0)
+        graus_restantes = grau_atual if eh_retrogrado else (30 - grau_atual)
+        
+        # Limitação de dias para planetas lentos
         dias_restantes_signo = math.ceil(graus_restantes / velocidade)
         
-        # ANÁLISE DO SIGNO ATUAL
-        analise_signo_atual = self.analisar_transito_em_signo(
+        # Limites realistas por planeta
+        limites_dias = {
+            'Sol': 31, 'Lua': 3, 'Mercúrio': 25, 'Vênus': 30,
+            'Marte': 60, 'Júpiter': 365, 'Saturno': 900, 
+            'Urano': 2500, 'Netuno': 4500, 'Plutão': 7300
+        }
+        
+        limite = limites_dias.get(planeta.get('name'), 365)
+        if dias_restantes_signo > limite:
+            dias_restantes_signo = limite
+        
+        # ANÁLISE DO SIGNO ATUAL - com timing realista
+        analise_signo_atual = self.analisar_transito_em_signo_corrigido(
             planeta, planeta.get('sign'), grau_inicio_signo_atual, grau_fim_signo_atual,
-            natal, houses_array, 0  # Já está no signo
+            natal, houses_array, 0, velocidade
         )
         
-        # ANÁLISE DO PRÓXIMO SIGNO (se vai entrar em menos de 12 meses)
+        # ANÁLISE DO PRÓXIMO SIGNO (se vai entrar em menos de 2 anos)
         analise_proximo_signo = None
-        if dias_restantes_signo < 365 and not eh_retrogrado:
+        if dias_restantes_signo < 730 and not eh_retrogrado:
             grau_inicio_proximo_signo = ((index_signo_atual + 1) % 12) * 30
             grau_fim_proximo_signo = grau_inicio_proximo_signo + 30
             
-            analise_proximo_signo = self.analisar_transito_em_signo(
+            analise_proximo_signo = self.analisar_transito_em_signo_corrigido(
                 planeta, proximo_signo, grau_inicio_proximo_signo, grau_fim_proximo_signo,
-                natal, houses_array, dias_restantes_signo
+                natal, houses_array, dias_restantes_signo, velocidade
             )
         
-        # Calcular retrogradacoes
+        # Calcular retrogradações - usar dados reais
         retrogradacoes = self.calcular_retrogradacoes(planeta, planeta.get('sign'), velocidade)
         
         return {
@@ -1345,7 +1364,7 @@ class AstroEngineCompleto:
                 # Índice 22: Cúspides
                 if data.get('houses'):
                     cuspides = data
-                    logger.info(f"✅ {len(data.get('houses', []))} casas processadas")
+                    logger.info(f'Cúspides encontradas: {len(data.get("houses", []))} casas')
         
         # Validações - EXATAS DO JS
         if not cuspides or not cuspides.get('houses'):
