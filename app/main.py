@@ -1484,6 +1484,32 @@ class AstroEngineCompleto:
         
         logger.info(f'Total de inputs recebidos: {len(inputs)}')
         
+        # DEBUG: Log detalhado da estrutura dos dados
+        logger.info(f'Tipo de dados_entrada: {type(dados_entrada)}')
+        
+        # Log dos primeiros elementos para debug
+        for i in range(min(3, len(inputs))):
+            elemento = inputs[i]
+            if elemento:
+                logger.info(f'Elemento {i}: {elemento.get("name", "SEM_NAME")} - Keys: {list(elemento.keys())[:5]}')
+            else:
+                logger.info(f'Elemento {i}: VAZIO/NULL')
+        
+        # Log específico do elemento 22
+        if len(inputs) > 22:
+            elemento_22 = inputs[22]
+            logger.info(f'Elemento 22 existe: {elemento_22 is not None}')
+            if elemento_22:
+                logger.info(f'Elemento 22 tipo: {type(elemento_22)}')
+                logger.info(f'Elemento 22 keys: {list(elemento_22.keys()) if isinstance(elemento_22, dict) else "NAO_E_DICT"}')
+                logger.info(f'Elemento 22 tem "houses": {"houses" in elemento_22 if isinstance(elemento_22, dict) else False}')
+                if isinstance(elemento_22, dict) and "houses" in elemento_22:
+                    logger.info(f'Número de casas: {len(elemento_22["houses"])}')
+            else:
+                logger.info(f'Elemento 22 é NULL/VAZIO')
+        else:
+            logger.info(f'Array tem apenas {len(inputs)} elementos, falta índice 22')
+        
         # Separar dados conforme estrutura fixa - EXATO DO JS
         transitos_atuais = []
         natal = []
@@ -1492,6 +1518,7 @@ class AstroEngineCompleto:
         for index, data in enumerate(inputs):
             # Pular dados vazios
             if not data:
+                logger.warning(f'Dados vazios no índice {index}')
                 continue
                 
             if index < 11:
@@ -1501,6 +1528,8 @@ class AstroEngineCompleto:
                     planeta_normalizado = self.normalizar_planeta_data(data)
                     transitos_atuais.append(planeta_normalizado)
                     logger.info(f'Trânsito {index}: {data.get("name")} em {data.get("sign")} (grau {data.get("normDegree", 0):.1f}) - Normalized: {planeta_normalizado.get("name", "N/A")}')
+                else:
+                    logger.warning(f'Trânsito {index} inválido: name={data.get("name")}, sign={data.get("sign")}')
                     
             elif index < 22:
                 # Próximos 11: Natal
@@ -1508,18 +1537,25 @@ class AstroEngineCompleto:
                     planeta_normalizado = self.normalizar_planeta_data(data)
                     natal.append(planeta_normalizado)
                     logger.info(f'Natal {index - 11}: {data.get("name")} em {data.get("sign")}, casa {data.get("house", 1)}')
+                else:
+                    logger.warning(f'Natal {index - 11} inválido: name={data.get("name")}, sign={data.get("sign")}')
                     
             elif index == 22:
                 # Índice 22: Cúspides
-                if data.get('houses'):
+                logger.info(f'Analisando índice 22: {list(data.keys()) if data else "dados vazios"}')
+                if data and data.get('houses'):
                     cuspides = data
                     logger.info(f'Cúspides encontradas: {len(data.get("houses", []))} casas')
+                else:
+                    logger.error(f'Cúspides não encontradas no índice 22. Dados: {data}')
         
         # Validações - EXATAS DO JS
         if not cuspides or not cuspides.get('houses'):
+            logger.error(f'ERRO: Cúspides não encontradas. cuspides={cuspides is not None}, houses={cuspides.get("houses") if cuspides else None}')
             return {'erro': "Cúspides não encontradas nos inputs"}
         
         if not transitos_atuais:
+            logger.error(f'ERRO: Nenhum trânsito encontrado. Total processado: {len(transitos_atuais)}')
             return {'erro': "Nenhum trânsito encontrado nos inputs"}
         
         houses_array = cuspides.get('houses', [])
@@ -1920,11 +1956,24 @@ async def astro_completo_nasa(data: List[Dict[str, Any]]):
     try:
         logger.info(f"🚀 Iniciando análise astro-completo-nasa com {len(data)} elementos")
         
-        # Debug: log dos primeiros elementos para entender a estrutura
-        logger.info(f"Elemento 0: {data[0].get('name', 'N/A') if len(data) > 0 else 'VAZIO'}")
-        logger.info(f"Elemento 22: {'houses' in data[22] if len(data) > 22 else 'ÍNDICE 22 NÃO EXISTE'}")
+        # CORREÇÃO: Extrair dados do formato N8N
+        # N8N envia: [{"json": {...}, "pairedItem": {...}}, ...]
+        # Precisamos extrair apenas o conteúdo de "json"
+        dados_extraidos = []
+        for item in data:
+            if isinstance(item, dict) and "json" in item:
+                dados_extraidos.append(item["json"])
+            else:
+                # Fallback: se não tiver "json", usar o item diretamente
+                dados_extraidos.append(item)
         
-        resultado = astro_engine.processar_completo(data)
+        logger.info(f"✅ Dados extraídos do formato N8N: {len(dados_extraidos)} elementos")
+        
+        # Debug: log dos primeiros elementos para confirmar
+        logger.info(f"Elemento 0: {dados_extraidos[0].get('name', 'N/A') if len(dados_extraidos) > 0 and dados_extraidos[0] else 'VAZIO'}")
+        logger.info(f"Elemento 22: {'houses' in dados_extraidos[22] if len(dados_extraidos) > 22 and dados_extraidos[22] else 'ÍNDICE 22 NÃO EXISTE OU VAZIO'}")
+        
+        resultado = astro_engine.processar_completo(dados_extraidos)
         execution_time = round((time.time() - start_time) * 1000, 2)
         logger.info(f"✅ Análise astro-completo-nasa concluída em {execution_time}ms")
         
