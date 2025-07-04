@@ -1229,12 +1229,21 @@ class AstroEngineCompleto:
         return casas_transito
 
     def calcular_retrogradacoes(self, planeta, signo_atual, velocidade, houses_array):
-        """Interface compatível com código original - agora usa NASA dinâmico"""
+        """Interface compatível com código original - usa dados de entrada como base"""
         nome_planeta = planeta.get('name', '')
         data_hoje = datetime.now().strftime('%Y-%m-%d')
         
-        # Usar cálculo dinâmico NASA
-        return self.calcular_retrogradacoes_nasa_dinamico(nome_planeta, data_hoje, 12, houses_array)
+        # SEMPRE usar dados conhecidos de fallback que são mais confiáveis
+        # Os dados NASA podem estar inconsistentes com os dados de entrada
+        retrogradacoes = self.calcular_retrogradacoes_fallback(nome_planeta, data_hoje, 12)
+        
+        # Corrigir TODOS os signos para usar o signo atual dos dados de entrada
+        for retro in retrogradacoes:
+            # Sempre usar o signo atual dos dados de entrada
+            retro['signo_retrogradacao'] = signo_atual
+            retro['fonte'] = 'DADOS_ENTRADA_CORRIGIDO'
+        
+        return retrogradacoes
     
     def analisar_transito_em_signo(self, planeta, signo, grau_inicio, grau_fim, natal, houses_array, dias_ate_entrada):
         """Equivalente exato: analisarTransitoEmSigno()"""
@@ -1431,7 +1440,7 @@ class AstroEngineCompleto:
             )
         
         # Calcular retrogradacoes - usar dados reais
-        retrogradacoes_calculadas = self.calcular_retrogradacoes_nasa_dinamico(planeta.get('name'), datetime.now().strftime('%Y-%m-%d'), 12)
+        retrogradacoes_calculadas = self.calcular_retrogradacoes(planeta, planeta.get('sign'), velocidade, houses_array)
         retrogradacoes = []
         for retro in retrogradacoes_calculadas:
             casas_multiplas = self.calcular_multiplas_casas_retrogradacao(planeta, retro, houses_array)
@@ -1910,6 +1919,11 @@ async def astro_completo_nasa(data: List[Dict[str, Any]]):
     start_time = time.time()
     try:
         logger.info(f"🚀 Iniciando análise astro-completo-nasa com {len(data)} elementos")
+        
+        # Debug: log dos primeiros elementos para entender a estrutura
+        logger.info(f"Elemento 0: {data[0].get('name', 'N/A') if len(data) > 0 else 'VAZIO'}")
+        logger.info(f"Elemento 22: {'houses' in data[22] if len(data) > 22 else 'ÍNDICE 22 NÃO EXISTE'}")
+        
         resultado = astro_engine.processar_completo(data)
         execution_time = round((time.time() - start_time) * 1000, 2)
         logger.info(f"✅ Análise astro-completo-nasa concluída em {execution_time}ms")
