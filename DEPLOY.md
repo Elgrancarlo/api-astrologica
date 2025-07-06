@@ -106,8 +106,9 @@ Visualize os logs no Portainer:
 ### Status
 
 Verifique o status:
-- **URL**: `http://localhost:8000/health`
-- **Ping**: `http://localhost:8000/ping`
+- **URL Produção**: `https://api.astrologia.illumiai.com/health`
+- **URL Local**: `http://localhost:8000/health`
+- **Ping**: `https://api.astrologia.illumiai.com/ping`
 
 ## 🛠️ Troubleshooting
 

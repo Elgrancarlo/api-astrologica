@@ -130,7 +130,9 @@ show_portainer_instructions() {
     echo "📋 Configurações importantes:"
     echo "- Nome da stack: $STACK_NAME"
     echo "- Imagem: $IMAGE_NAME:$IMAGE_TAG"
-    echo "- Porta: 8000"
+    echo "- Domínio: api.astrologia.illumiai.com"
+    echo "- Network: network_public"
+    echo "- SSL: Habilitado com Let's Encrypt"
     echo ""
     echo "📖 Para mais detalhes, veja o arquivo DEPLOY.md"
 }

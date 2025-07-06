@@ -3,8 +3,6 @@ version: '3.8'
 services:
   api-astrologica:
     image: api-astrologica:latest
-    ports:
-      - "8000:8000"
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
@@ -32,12 +30,15 @@ services:
         window: 120s
       labels:
         - "traefik.enable=true"
-        - "traefik.http.routers.api-astrologica.rule=Host(`api-astrologica.localhost`)"
+        - "traefik.http.routers.api-astrologica.rule=Host(`api.astrologia.illumiai.com`)"
+        - "traefik.http.routers.api-astrologica.entrypoints=websecure"
+        - "traefik.http.routers.api-astrologica.tls=true"
+        - "traefik.http.routers.api-astrologica.tls.certresolver=letsencrypt"
         - "traefik.http.services.api-astrologica.loadbalancer.server.port=8000"
+        - "traefik.docker.network=network_public"
     networks:
-      - api-network
+      - network_public
 
 networks:
-  api-network:
-    driver: overlay
-    external: false 
+  network_public:
+    external: true 

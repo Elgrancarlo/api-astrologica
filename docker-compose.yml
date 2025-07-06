@@ -25,9 +25,16 @@ services:
         reservations:
           cpus: '0.5'
           memory: 512M
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.api-astrologica-dev.rule=Host(`api.astrologia.illumiai.com`)"
+      - "traefik.http.routers.api-astrologica-dev.entrypoints=websecure"
+      - "traefik.http.routers.api-astrologica-dev.tls=true"
+      - "traefik.http.services.api-astrologica-dev.loadbalancer.server.port=8000"
+      - "traefik.docker.network=network_public"
     networks:
-      - api-network
+      - network_public
 
 networks:
-  api-network:
-    driver: bridge 
+  network_public:
+    external: true 
