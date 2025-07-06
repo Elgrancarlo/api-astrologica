@@ -185,6 +185,91 @@ def limitar_aspectos_para_gemini(aspectos: List[Dict[str, Any]], limite: int = 5
     aspectos_ordenados = sorted(aspectos, key=lambda x: x.get('intensidade', 0), reverse=True)
     return aspectos_ordenados[:limite]
 
+# CACHE GLOBAL PARA PERFORMANCE
+_cache_planetas = {}
+_cache_datas_futuras = {}
+_cache_aspectos = {}
+
+def limpar_cache():
+    """Limpa caches para nova requisição"""
+    global _cache_planetas, _cache_datas_futuras, _cache_aspectos
+    _cache_planetas.clear()
+    _cache_datas_futuras.clear()
+    _cache_aspectos.clear()
+
+def calcular_data_futura_cached(dias_adicionais: int) -> str:
+    """Versão cached do cálculo de data futura"""
+    if dias_adicionais in _cache_datas_futuras:
+        return _cache_datas_futuras[dias_adicionais]
+    
+    hoje = datetime.now()
+    data_futura = hoje + timedelta(days=dias_adicionais)
+    resultado = data_futura.strftime('%Y-%m-%d')
+    _cache_datas_futuras[dias_adicionais] = resultado
+    return resultado
+
+def encontrar_planeta_cached(nome: str, lista: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Versão cached da busca de planetas"""
+    cache_key = f"{nome}_{id(lista)}"
+    if cache_key in _cache_planetas:
+        return _cache_planetas[cache_key]
+    
+    nome_normalizado_search = unicodedata.normalize("NFD", nome).encode("ascii", "ignore").decode("utf-8")
+    
+    for p in lista:
+        if not p or not p.get('name'):
+            continue
+        
+        planeta_nome_na_lista = p.get('name')
+        planeta_nome_normalizado_na_lista = unicodedata.normalize("NFD", planeta_nome_na_lista).encode("ascii", "ignore").decode("utf-8")
+        
+        if (planeta_nome_na_lista == nome or 
+            planeta_nome_normalizado_na_lista == nome_normalizado_search):
+            _cache_planetas[cache_key] = p
+            return p
+    
+    _cache_planetas[cache_key] = None
+    return None
+
+def calcular_aspectos_batch(planeta_grau: float, planetas_natais: List[Dict], nome_planeta: str) -> List[Dict[str, Any]]:
+    """Calcula aspectos em batch para melhor performance"""
+    aspectos = []
+    aspectos_principais = [
+        (0, "conjunção", "harmonioso", 10),
+        (60, "sextil", "harmonioso", 6),
+        (90, "quadratura", "desafiador", 8),
+        (120, "trígono", "harmonioso", 7),
+        (180, "oposição", "desafiador", 9)
+    ]
+    
+    for planeta_natal in planetas_natais:
+        if not planeta_natal or not planeta_natal.get('fullDegree'):
+            continue
+            
+        diferenca = abs(planeta_grau - planeta_natal['fullDegree'])
+        if diferenca > 180:
+            diferenca = 360 - diferenca
+        
+        # Determinar orbe máximo baseado no planeta
+        orbe_maximo = 5 if nome_planeta in ['Sol', 'Lua', 'Mercúrio', 'Vênus', 'Marte'] else 3
+        
+        for angulo_exato, nome_aspecto, natureza, intensidade in aspectos_principais:
+            orbe_atual = abs(diferenca - angulo_exato)
+            if orbe_atual <= orbe_maximo:
+                aspectos.append({
+                    "planeta_natal": planeta_natal.get('name'),
+                    "signo_natal": planeta_natal.get('sign'),
+                    "casa_natal": planeta_natal.get('house'),
+                    "tipo_aspecto": nome_aspecto,
+                    "natureza": natureza,
+                    "intensidade": intensidade,
+                    "orbe": f"{orbe_atual:.1f}",
+                    "orbe_maximo_usado": orbe_maximo
+                })
+                break  # Apenas um aspecto por planeta
+    
+    return aspectos
+
 def criar_versao_resumida_para_gemini(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
     """Cria versão resumida dos dados para enviar ao Gemini"""
     
@@ -401,21 +486,25 @@ class AdvancedAstroCalculator:
         self.planetas_lentos = ['Jupiter', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutao', 'Plutão']
         self.planetas_rapidos = ['Sol', 'Mercúrio', 'Vênus', 'Marte']
          
-        # Aspectos principais
-        self.aspectos = [
+        # Aspectos principais - OTIMIZADO: usar tuplas ao invés de listas para performance
+        self.aspectos = (
             (0, "conjunção", "harmonioso", 10),
             (60, "sextil", "harmonioso", 6),
             (90, "quadratura", "desafiador", 8),
             (120, "trígono", "harmonioso", 7),
             (180, "oposição", "desafiador", 9)
-        ]
+        )
          
-        # Velocidades médias diárias (graus/dia)
+        # Velocidades médias diárias (graus/dia) - OTIMIZADO: cache de velocidades
         self.velocidades_medias = {
             'Sol': 0.98, 'Lua': 13.2, 'Mercúrio': 1.38, 'Vênus': 1.2, 'Marte': 0.52,
             'Jupiter': 0.08, 'Júpiter': 0.08, 'Saturno': 0.03, 'Urano': 0.01,
             'Netuno': 0.006, 'Plutao': 0.004, 'Plutão': 0.004
         }
+        
+        # OTIMIZAÇÃO: Cache para evitar recálculos
+        self._cache_aspectos = {}
+        self._cache_casas = {}
         
         # Mapeamento de oportunidades por casa para Júpiter
         self.oportunidades_jupiter = {
@@ -434,12 +523,20 @@ class AdvancedAstroCalculator:
         }
     
     def determinar_tipo_planeta(self, nome_planeta: str) -> Dict[str, Any]:
-        """Determina tipo de planeta e orbe apropriado"""
+        """Determina tipo de planeta e orbe apropriado - OTIMIZADO com cache"""
+        # OTIMIZAÇÃO: usar cache para evitar recálculos
+        if nome_planeta in self._cache_aspectos:
+            return self._cache_aspectos[nome_planeta]
+            
         if nome_planeta in self.planetas_pessoais:
-            return {"tipo": "pessoal", "orbe": 5}
+            result = {"tipo": "pessoal", "orbe": 5}
         elif nome_planeta in self.planetas_transpessoais:
-            return {"tipo": "transpessoal", "orbe": 3}
-        return {"tipo": "transpessoal", "orbe": 3}
+            result = {"tipo": "transpessoal", "orbe": 3}
+        else:
+            result = {"tipo": "transpessoal", "orbe": 3}
+            
+        self._cache_aspectos[nome_planeta] = result
+        return result
     
     def calcular_diferenca_angular(self, grau1: float, grau2: float) -> float:
         """Calcula diferença angular entre dois graus"""
@@ -929,43 +1026,41 @@ import ephem
 import numpy as np
 
 class AstroEngineCompleto:
-    """
-    Engine que substitui EXATAMENTE o código JavaScript
-    Mantém todas as funcionalidades + dados NASA
-    """
+    """Motor astrológico completo - equivalente ao código JavaScript original"""
     
     def __init__(self):
-        try:
-            # Carregar dados NASA/JPL
-            self.loader = Loader('.')
-            self.planets = self.loader('de421.bsp')
-            self.ts = self.loader.timescale()
-            self.earth = self.planets['earth']
-            
-            # Mapeamento planetas (exato do JS)
-            self.planet_map = {
-                'Sol': self.planets['sun'],
-                'Lua': self.planets['moon'], 
-                'Mercúrio': self.planets['mercury'],
-                'Vênus': self.planets['venus'],
-                'Marte': self.planets['mars barycenter'],
-                'Júpiter': self.planets['jupiter barycenter'],
-                'Saturno': self.planets['saturn barycenter'],
-                'Urano': self.planets['uranus barycenter'],
-                'Netuno': self.planets['neptune barycenter'],
-                'Plutão': self.planets['pluto barycenter']
-            }
-            
-            self.signos = ['Áries', 'Touro', 'Gêmeos', 'Câncer', 'Leão', 'Virgem',
-                          'Libra', 'Escorpião', 'Sagitário', 'Capricórnio', 'Aquário', 'Peixes']
-            
-            self.usar_nasa = True
-            logger.info("AstroEngine inicializado com dados NASA/JPL")
-            
-        except Exception as e:
-            logger.error(f"Erro ao carregar NASA: {e}")
-            self.usar_nasa = False
-            logger.warning("Usando dados alternativos")
+        """OTIMIZADO: Inicialização mais rápida"""
+        self.signos = ['Áries', 'Touro', 'Gêmeos', 'Câncer', 'Leão', 'Virgem',
+                      'Libra', 'Escorpião', 'Sagitário', 'Capricórnio', 'Aquário', 'Peixes']
+        
+        # OTIMIZAÇÃO: Usar sets para verificações rápidas de membership
+        self.planetas_pessoais = {'Sol', 'Lua', 'Mercúrio', 'Vênus', 'Marte'}
+        self.planetas_transpessoais = {'Jupiter', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutao', 'Plutão'}
+        self.planetas_lentos = {'Jupiter', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutao', 'Plutão'}
+        
+        # Cache para melhor performance
+        self._planeta_cache = {}
+        self._casa_cache = {}
+        
+        # CONFIGURAÇÃO NASA/JPL
+        self.usar_nasa = False  # Desabilitado por padrão para melhor performance
+        self.nasa_base_url = "https://ssd.jpl.nasa.gov/api/horizons.api"
+        
+        # Dados de emergência para retrogradações (cache estático)
+        self.dados_retrogradacao_cache = {
+            'Mercúrio': [
+                {'inicio': '2025-03-15', 'fim': '2025-04-07', 'signo': 'Áries'},
+                {'inicio': '2025-07-18', 'fim': '2025-08-11', 'signo': 'Leão'},
+                {'inicio': '2025-11-09', 'fim': '2025-11-29', 'signo': 'Sagitário'}
+            ],
+            'Vênus': [{'inicio': '2025-07-26', 'fim': '2025-09-06', 'signo': 'Virgem'}],
+            'Marte': [{'inicio': '2025-12-06', 'fim': '2026-02-24', 'signo': 'Leão'}],
+            'Júpiter': [{'inicio': '2025-05-09', 'fim': '2025-09-11', 'signo': 'Gêmeos'}],
+            'Saturno': [{'inicio': '2025-05-24', 'fim': '2025-10-15', 'signo': 'Peixes'}],
+            'Urano': [{'inicio': '2025-09-01', 'fim': '2026-01-30', 'signo': 'Touro'}],
+            'Netuno': [{'inicio': '2025-07-02', 'fim': '2025-12-07', 'signo': 'Peixes'}],
+            'Plutão': [{'inicio': '2025-05-04', 'fim': '2025-10-11', 'signo': 'Aquário'}]
+        }
     
     def normalizar_planeta_data(self, data):
         """Normaliza dados de entrada para formato interno"""
@@ -2024,8 +2119,23 @@ async def root():
             "problemas_tokens": "Use /verificar-tamanho",
             "converter_dados": "Use /converter-para-gemini"
         },
+        "performance_info": {
+            "render_gratuito": "Cold start pode levar 50-90 segundos",
+            "processamento_real": "30-60 segundos após inicialização",
+            "dica": "Use /ping para manter API ativa"
+        },
         "docs": "/docs",
         "health": "/health"
+    }
+
+@app.get("/ping")
+async def ping():
+    """Endpoint ultra-leve para keep-alive e evitar cold start do Render"""
+    return {
+        "status": "alive",
+        "timestamp": time.time(),
+        "uptime": "active",
+        "message": "API está ativa - sem cold start"
     }
 
 @app.get("/health")
@@ -2035,7 +2145,27 @@ async def health_check():
         "status": "healthy",
         "timestamp": time.time(),
         "service": "astro-microservice-v2",
-        "features_count": 15
+        "render_status": "Gratuito - pode ter cold start",
+        "performance_tip": "Use /ping para manter ativo"
+    }
+
+@app.get("/warm-up")
+async def warm_up():
+    """Endpoint para aquecer a API após cold start"""
+    start_time = time.time()
+    
+    # Inicializar componentes principais rapidamente
+    calc_test = AdvancedAstroCalculator()
+    engine_test = AstroEngineCompleto()
+    
+    warm_time = round((time.time() - start_time) * 1000, 2)
+    
+    return {
+        "status": "warmed_up",
+        "warm_time_ms": warm_time,
+        "components_loaded": ["AdvancedAstroCalculator", "AstroEngineCompleto"],
+        "ready_for_requests": True,
+        "message": "API aquecida e pronta para processar requisições rapidamente"
     }
 
 @app.post("/analyze-professional", response_model=AnalysisResponse)

@@ -1,0 +1,108 @@
+# Configuração para diferentes ambientes no Portainer
+# Escolha o ambiente desejado e use as configurações correspondentes
+
+# =============================================================================
+# AMBIENTE DE DESENVOLVIMENTO
+# =============================================================================
+development:
+  stack_name: "api-astrologica-dev"
+  image: "api-astrologica:dev"
+  port: "8000:8000"
+  replicas: 1
+  resources:
+    cpu_limit: "1"
+    memory_limit: "512M"
+    cpu_reservation: "0.25"
+    memory_reservation: "256M"
+  environment:
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/app
+    - ENV=development
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.api-astrologica-dev.rule=Host(`api-astrologica-dev.localhost`)"
+    - "traefik.http.services.api-astrologica-dev.loadbalancer.server.port=8000"
+
+# =============================================================================
+# AMBIENTE DE PRODUÇÃO
+# =============================================================================
+production:
+  stack_name: "api-astrologica-prod"
+  image: "api-astrologica:latest"
+  port: "8000:8000"
+  replicas: 2
+  resources:
+    cpu_limit: "2"
+    memory_limit: "1G"
+    cpu_reservation: "0.5"
+    memory_reservation: "512M"
+  environment:
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/app
+    - ENV=production
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.api-astrologica.rule=Host(`api-astrologica.yourdomain.com`)"
+    - "traefik.http.services.api-astrologica.loadbalancer.server.port=8000"
+    - "traefik.http.routers.api-astrologica.tls=true"
+    - "traefik.http.routers.api-astrologica.tls.certresolver=letsencrypt"
+
+# =============================================================================
+# AMBIENTE DE STAGING
+# =============================================================================
+staging:
+  stack_name: "api-astrologica-staging"
+  image: "api-astrologica:staging"
+  port: "8000:8000"
+  replicas: 1
+  resources:
+    cpu_limit: "1.5"
+    memory_limit: "768M"
+    cpu_reservation: "0.5"
+    memory_reservation: "384M"
+  environment:
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/app
+    - ENV=staging
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.api-astrologica-staging.rule=Host(`api-astrologica-staging.yourdomain.com`)"
+    - "traefik.http.services.api-astrologica-staging.loadbalancer.server.port=8000"
+
+# =============================================================================
+# CONFIGURAÇÕES CUSTOMIZADAS
+# =============================================================================
+custom:
+  # Personalize conforme sua necessidade
+  stack_name: "api-astrologica-custom"
+  image: "api-astrologica:custom"
+  port: "8000:8000"
+  replicas: 1
+  resources:
+    cpu_limit: "1"
+    memory_limit: "512M"
+    cpu_reservation: "0.25"
+    memory_reservation: "256M"
+  environment:
+    - PYTHONUNBUFFERED=1
+    - PYTHONPATH=/app
+    - ENV=custom
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.api-astrologica-custom.rule=Host(`your-custom-domain.com`)"
+    - "traefik.http.services.api-astrologica-custom.loadbalancer.server.port=8000"
+
+# =============================================================================
+# NOTAS DE CONFIGURAÇÃO
+# =============================================================================
+# 
+# 1. Ajuste os recursos conforme sua infraestrutura
+# 2. Substitua 'yourdomain.com' pelo seu domínio real
+# 3. Configure certificados SSL se necessário
+# 4. Ajuste o número de réplicas conforme a demanda
+# 5. Use registry privado para ambientes de produção
+# 
+# Para usar no Portainer:
+# 1. Copie as configurações do ambiente desejado
+# 2. Aplique no arquivo stack.yml
+# 3. Deploy via Portainer 
