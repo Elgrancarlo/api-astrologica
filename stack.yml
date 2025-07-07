@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   api-astrologica:
-    image: api-astrologica:latest
+    image: elgrancarlo/api-astrologica:latest
     restart: unless-stopped
     environment:
       - PYTHONUNBUFFERED=1
@@ -29,13 +29,21 @@ services:
         max_attempts: 3
         window: 120s
       labels:
+        # 1. Habilita o Traefik e especifica a rede de comunicação
         - "traefik.enable=true"
-        - "traefik.http.routers.api-astrologica.rule=Host(`api.astrologia.illumiai.com`)"
-        - "traefik.http.routers.api-astrologica.entrypoints=websecure"
-        - "traefik.http.routers.api-astrologica.tls=true"
-        - "traefik.http.routers.api-astrologica.tls.certresolver=letsencrypt"
-        - "traefik.http.services.api-astrologica.loadbalancer.server.port=8000"
         - "traefik.docker.network=network_public"
+
+        # 2. Define o Router com um nome único e regras claras
+        - "traefik.http.routers.api-astro-router.rule=Host(`api.astrologia.illumiai.com`)"
+        - "traefik.http.routers.api-astro-router.entrypoints=websecure"
+        - "traefik.http.routers.api-astro-router.tls.certresolver=letsencrypt"
+        
+        # 3. Vincula explicitamente o Router a um Serviço nomeado (CRUCIAL!)
+        - "traefik.http.routers.api-astro-router.service=api-astro-svc"
+
+        # 4. Define o Serviço nomeado e especifica a porta do contêiner
+        - "traefik.http.services.api-astro-svc.loadbalancer.server.port=8000"
+
     networks:
       - network_public
 
