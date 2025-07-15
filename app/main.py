@@ -2031,45 +2031,174 @@ class AstroEngineCompleto:
 # Instância global para o novo motor
 astro_engine = AstroEngineCompleto()
 
+# ============================================================================
+# FUNÇÃO PARA CRIAR OUTPUT MÍNIMO DE TRÂNSITOS (REDUÇÃO DE ~90%)
+# ============================================================================
+
+def criar_output_minimo_transitos(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Cria output MÍNIMO (redução de ~90%) mantendo apenas dados essenciais 
+    para LLM produzir respostas sobre trânsitos específicos.
+    
+    Filtra apenas:
+    - Planetas com relevância ≥ 5
+    - Máximo 3 casas por planeta
+    - Máximo 5 aspectos por planeta (intensidade ≥ 6)
+    - Máximo 2 retrogradações por planeta
+    """
+    
+    todos_transitos = dados_completos.get('todos_transitos', [])
+    planetas_minimos = []
+    
+    # Processar apenas planetas relevantes
+    for transito in todos_transitos:
+        relevancia = transito.get('relevancia', 0)
+        if relevancia < 5:  # Ignorar planetas irrelevantes
+            continue
+            
+        planeta_nome = transito.get('planeta')
+        if not planeta_nome:
+            continue
+        
+        # DADOS BÁSICOS (mínimo necessário)
+        planeta_basico = {
+            'planeta': planeta_nome,
+            'signo': transito.get('signo_atual'),
+            'grau': transito.get('grau_atual'),
+            'retrogrado': transito.get('eh_retrogrado', False)
+        }
+        
+        # CASAS ATIVADAS (máximo 3, dados essenciais)
+        analise_signo = transito.get('analise_signo_atual', {})
+        casas_originais = analise_signo.get('casas_ativadas', [])
+        
+        casas_minimas = []
+        for casa in casas_originais[:3]:  # Máximo 3 casas
+            casas_minimas.append({
+                'casa': casa.get('casa'),
+                'entrada': casa.get('data_entrada'),
+                'saida': casa.get('data_saida'),
+                'meses': round(casa.get('permanencia_meses', 0), 1)
+            })
+        
+        # RETROGRADAÇÕES (máximo 2, dados essenciais)
+        retros_originais = transito.get('retrogradacoes', [])
+        retros_minimas = []
+        
+        for retro in retros_originais[:2]:  # Máximo 2 retrogradações
+            retros_minimas.append({
+                'inicio': retro.get('inicio'),
+                'fim': retro.get('fim'),
+                'signo_anterior': retro.get('signo_retrogradacao'),
+                'dias': retro.get('duracao_dias', 0)
+            })
+        
+        # ASPECTOS (apenas maiores com intensidade ≥ 6, máximo 5)
+        aspectos_originais = analise_signo.get('aspectos_com_natal', [])
+        
+        # Filtrar apenas aspectos importantes
+        aspectos_importantes = [
+            asp for asp in aspectos_originais 
+            if (asp.get('tipo_aspecto') in ['conjunção', 'trígono', 'sextil', 'quadratura', 'oposição'] 
+                and asp.get('intensidade', 0) >= 6)
+        ]
+        
+        # Ordenar por intensidade e pegar top 5
+        aspectos_importantes.sort(key=lambda x: x.get('intensidade', 0), reverse=True)
+        
+        aspectos_minimos = []
+        for aspecto in aspectos_importantes[:5]:  # Máximo 5 aspectos
+            aspectos_minimos.append({
+                'tipo': aspecto.get('tipo_aspecto'),
+                'planeta_natal': aspecto.get('planeta_natal'),
+                'casa_natal': aspecto.get('casa_natal'),
+                'inicio': aspecto.get('data_inicio'),
+                'fim': aspecto.get('data_fim'),
+                'intensidade': aspecto.get('intensidade')
+            })
+        
+        # TEMPO NO SIGNO
+        tempo_signo = transito.get('tempo_restante_signo', {})
+        
+        # Montar planeta mínimo
+        planeta_minimo = {
+            'info': planeta_basico,
+            'casas': casas_minimas,
+            'retrogradacoes': retros_minimas,
+            'aspectos': aspectos_minimos,
+            'tempo_restante': {
+                'dias': tempo_signo.get('dias', 0),
+                'data_mudanca': tempo_signo.get('data_mudanca'),
+                'proximo_signo': transito.get('proximo_signo')
+            }
+        }
+        
+        planetas_minimos.append(planeta_minimo)
+    
+    # Ordenar por importância (mais aspectos + mais casas = mais importante)
+    planetas_minimos.sort(
+        key=lambda x: len(x['aspectos']) + len(x['casas']), 
+        reverse=True
+    )
+    
+    # Output final ULTRA REDUZIDO
+    return {
+        'planetas': planetas_minimos[:6],  # Máximo 6 planetas
+        'mudancas_signo': dados_completos.get('mudancas_signo_proximas', [])[:3],  # Máximo 3
+        'periodo': '12 meses',
+        'data_analise': dados_completos.get('meta_info', {}).get('data_analise'),
+        'total_planetas_analisados': len(planetas_minimos)
+    }
+
 # ============ ENDPOINTS ============
 
 @app.get("/")
 async def root():
     """Endpoint raiz - verificar se API está funcionando"""
     return {
-        "message": "🌟 API Astrológica Profissional v2.0 - OTIMIZADA",
+        "message": "🌟 API Astrológica Profissional v2.0 - OTIMIZADA + TRÂNSITOS MÍNIMOS",
         "status": "online",
-        "versao": "2.0-otimizada",
-        "endpoints_disponíveis": {
+        "versao": "2.0-otimizada-transitos-minimos",
+        
+        "🚨 PROBLEMA_RESOLVIDO": {
+            "antes": "Output gigantesco que estourava contexto do Claude",
+            "depois": "Output 90% menor mantendo dados essenciais",
+            "resultado": "LLM produz respostas corretas sobre trânsitos específicos"
+        },
+        
+        "🎯 ENDPOINTS_PARA_TRANSITOS_ESPECIFICOS": {
             "principal": {
-                "endpoint": "/astro-completo-nasa",
+                "endpoint": "/transitos-minimo",
                 "método": "POST",
-                "descrição": "Análise completa otimizada (RECOMENDADO)",
-                "funcionalidades": [
-                    "Output otimizado para LLMs",
-                    "Priorização por relevância",
-                    "Todas as análises necessárias",
-                    "Compatível com limite de tokens do Gemini"
+                "descrição": "OUTPUT MÍNIMO para análise geral - Reduz 90% do tamanho",
+                "uso": "Quando LLM precisa responder sobre trânsitos seguindo padrão VI",
+                "vantagens": [
+                    "✅ Não estoura contexto do Claude",
+                    "✅ LLM produz respostas mais precisas",
+                    "✅ Mantém todos dados essenciais",
+                    "✅ Ideal para padrão VI. TRÂNSITOS ESPECÍFICOS"
                 ]
             },
-            "planetas_individualizados": {
-                "endpoint": "/planetas-individualizados",
+            "individual": {
+                "endpoint": "/planeta-especifico-minimo",
                 "método": "POST",
-                "descrição": "Dados organizados por planeta individual - RESPEITANDO limite tokens Gemini",
-                "uso": "Para quando LLM precisa extrair dados de planeta específico",
-                "formato_saida": "planetas['Saturno'] = dados do Saturno",
-                "otimizacoes": [
-                    "Máximo 6 planetas (por relevância)",
-                    "5 aspectos mais importantes por planeta",
-                    "3 casas principais por planeta",
-                    "Estimativa: 150k-250k tokens"
-                ],
-                "funcionalidades": [
-                    "Dados organizados por planeta",
-                    "Fácil extração de informações específicas",
-                    "Aspectos organizados por tipo",
-                    "Status de interpretação incluído"
-                ]
+                "descrição": "Análise de 1 planeta específico - dados mínimos",
+                "formato_input": {
+                    "planeta": "Saturno",
+                    "dados_entrada": "[array com 23+ elementos]"
+                },
+                "uso": "Para perguntas como 'Como Saturno vai me impactar?'"
+            }
+        },
+        
+        "📊 OUTROS_ENDPOINTS": {
+            "completo_otimizado": {
+                "endpoint": "/astro-completo-nasa",
+                "descrição": "Análise completa otimizada (ainda pode ser grande)"
+            },
+            "individualizados": {
+                "endpoint": "/planetas-individualizados", 
+                "descrição": "Dados organizados por planeta"
             },
             "transito_especifico": {
                 "endpoint": "/transito-especifico",
@@ -2102,18 +2231,36 @@ async def root():
                 "aviso": "Pode exceder limite de tokens do Gemini"
             }
         },
+        
+        "✅ DADOS_MANTIDOS_NOS_ENDPOINTS_MINIMOS": [
+            "Casas ativadas com datas precisas",
+            "Retrogradações com períodos e signo anterior",
+            "Aspectos maiores (conjunção, trígono, sextil, quadratura, oposição)",
+            "Orbe de 5 graus para aspectos",
+            "Período de análise: 12 meses",
+            "Tempo restante no signo atual",
+            "Dados para resposta padrão VI. TRÂNSITOS ESPECÍFICOS"
+        ],
+        
+        "📝 COMO_USAR": {
+            "analise_geral_minima": "POST /transitos-minimo com array de 23+ elementos",
+            "planeta_especifico": "POST /planeta-especifico-minimo com {planeta: 'Saturno', dados_entrada: [...]}"
+        },
+        
         "funcionalidades_principais": [
             "Análise completa de todos os planetas",
+            "Output MÍNIMO para trânsitos específicos",
             "Casas ativadas com datas precisas",
             "Aspectos com orbe de 5 graus",
             "Retrogradações detalhadas",
             "Mudanças de signo próximas",
             "Período de análise: 12 meses",
-            "Output otimizado para LLMs",
-            "Compatível com limite de tokens do Gemini"
+            "Compatível com limite de tokens do Claude"
         ],
+        
         "casos_uso": {
-            "analise_geral": "Use /astro-completo-nasa",
+            "analise_geral": "Use /transitos-minimo (RECOMENDADO)",
+            "planeta_especifico": "Use /planeta-especifico-minimo",
             "consulta_planeta_especifico": "Use /planetas-individualizados",
             "planeta_ja_conhecido": "Use /transito-especifico",
             "problemas_tokens": "Use /verificar-tamanho",
@@ -2788,14 +2935,196 @@ async def planetas_individualizados(data: List[Dict[str, Any]]):
         logger.error(f"❌ Erro no endpoint planetas individualizados: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
+# ============================================================================
+# NOVOS ENDPOINTS OTIMIZADOS PARA TRÂNSITOS ESPECÍFICOS
+# ============================================================================
+
+@app.post("/transitos-minimo")
+async def transitos_output_minimo(data: List[Dict[str, Any]]):
+    """
+    🎯 ENDPOINT OTIMIZADO PARA TRÂNSITOS ESPECÍFICOS
+    
+    Retorna apenas dados MÍNIMOS necessários para LLM produzir
+    respostas sobre trânsitos específicos sem estourar contexto.
+    
+    Redução: ~90% menor que output completo
+    Mantém: Todos dados essenciais para análise VI. TRÂNSITOS ESPECÍFICOS
+    """
+    start_time = time.time()
+    try:
+        logger.info(f"🎯 TRÂNSITOS MÍNIMO: Iniciando com {len(data)} elementos")
+        
+        # Extrair dados do formato N8N (mesmo padrão dos outros endpoints)
+        dados_extraidos = []
+        for item in data:
+            if isinstance(item, dict) and "json" in item:
+                dados_extraidos.append(item["json"])
+            else:
+                dados_extraidos.append(item)
+        
+        # Processar análise completa primeiro
+        resultado_completo = astro_engine.processar_completo(dados_extraidos)
+        
+        # Criar output MÍNIMO
+        output_minimo = criar_output_minimo_transitos(resultado_completo)
+        
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ TRÂNSITOS MÍNIMO: Concluído em {execution_time}ms")
+        
+        # Meta informações mínimas
+        output_minimo['meta'] = {
+            'tipo': 'transitos_minimo',
+            'tempo_ms': execution_time,
+            'reducao_tamanho': '~90% menor que output completo',
+            'ideal_para': 'Respostas sobre trânsitos específicos - padrão VI',
+            'dados_mantidos': [
+                'Casas ativadas com datas',
+                'Retrogradações com períodos', 
+                'Aspectos maiores (orbe 5°)',
+                'Tempo restante no signo'
+            ]
+        }
+        
+        return output_minimo
+        
+    except Exception as e:
+        logger.error(f"❌ Erro TRÂNSITOS MÍNIMO: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
+
+
+@app.post("/planeta-especifico-minimo")
+async def planeta_especifico_minimo(request: Dict[str, Any]):
+    """
+    🔍 ANÁLISE DE PLANETA ESPECÍFICO - OUTPUT MÍNIMO
+    
+    Para quando você quer analisar apenas 1 planeta específico.
+    Ideal para perguntas como "Como Saturno vai me impactar?"
+    
+    Input: {
+        "planeta": "Saturno",
+        "dados_entrada": [array com 23+ elementos]
+    }
+    
+    Output: Dados mínimos apenas do planeta solicitado
+    """
+    start_time = time.time()
+    try:
+        planeta_nome = request.get('planeta', '').strip()
+        dados_entrada = request.get('dados_entrada', [])
+        
+        if not planeta_nome:
+            raise HTTPException(status_code=400, detail="Campo 'planeta' é obrigatório")
+        
+        if not dados_entrada or len(dados_entrada) < 23:
+            raise HTTPException(
+                status_code=400, 
+                detail="Campo 'dados_entrada' deve ter pelo menos 23 elementos"
+            )
+        
+        logger.info(f"🔍 PLANETA ESPECÍFICO: Analisando {planeta_nome}")
+        
+        # Processar dados completos
+        resultado_completo = astro_engine.processar_completo(dados_entrada)
+        
+        # Buscar planeta específico
+        todos_transitos = resultado_completo.get('todos_transitos', [])
+        planeta_encontrado = None
+        
+        for transito in todos_transitos:
+            if transito.get('planeta', '').lower() == planeta_nome.lower():
+                planeta_encontrado = transito
+                break
+        
+        if not planeta_encontrado:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Planeta '{planeta_nome}' não encontrado nos dados"
+            )
+        
+        # Extrair dados mínimos apenas deste planeta
+        analise_signo = planeta_encontrado.get('analise_signo_atual', {})
+        
+        resultado_planeta = {
+            'planeta': planeta_nome,
+            'signo': planeta_encontrado.get('signo_atual'),
+            'grau': round(planeta_encontrado.get('grau_atual', 0), 1),
+            'retrogrado': planeta_encontrado.get('eh_retrogrado', False),
+            
+            # Casas ativadas (todas as encontradas)
+            'casas': [
+                {
+                    'numero': casa.get('casa'),
+                    'data_entrada': casa.get('data_entrada'),
+                    'data_saida': casa.get('data_saida'),
+                    'permanencia_meses': round(casa.get('permanencia_meses', 0), 1)
+                }
+                for casa in analise_signo.get('casas_ativadas', [])
+            ],
+            
+            # Retrogradações
+            'retrogradacoes': [
+                {
+                    'data_inicio': retro.get('inicio'),
+                    'data_fim': retro.get('fim'),
+                    'signo_anterior': retro.get('signo_retrogradacao'),
+                    'duracao_dias': retro.get('duracao_dias', 0)
+                }
+                for retro in planeta_encontrado.get('retrogradacoes', [])
+            ],
+            
+            # Aspectos maiores apenas (orbe 5°)
+            'aspectos': [
+                {
+                    'tipo': asp.get('tipo_aspecto'),
+                    'planeta_natal': asp.get('planeta_natal'),
+                    'casa_natal': asp.get('casa_natal'),
+                    'data_inicio': asp.get('data_inicio'),
+                    'data_fim': asp.get('data_fim'),
+                    'intensidade': asp.get('intensidade')
+                }
+                for asp in analise_signo.get('aspectos_com_natal', [])
+                if asp.get('tipo_aspecto') in ['conjunção', 'trígono', 'sextil', 'quadratura', 'oposição']
+            ],
+            
+            # Tempo restante no signo
+            'tempo_no_signo': {
+                'dias_restantes': planeta_encontrado.get('tempo_restante_signo', {}).get('dias', 0),
+                'data_mudanca': planeta_encontrado.get('tempo_restante_signo', {}).get('data_mudanca'),
+                'proximo_signo': planeta_encontrado.get('proximo_signo')
+            }
+        }
+        
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ PLANETA ESPECÍFICO: {planeta_nome} analisado em {execution_time}ms")
+        
+        return {
+            'resultado': resultado_planeta,
+            'meta': {
+                'planeta_analisado': planeta_nome,
+                'tempo_processamento_ms': execution_time,
+                'resumo': {
+                    'total_casas': len(resultado_planeta['casas']),
+                    'total_aspectos': len(resultado_planeta['aspectos']),
+                    'total_retrogradacoes': len(resultado_planeta['retrogradacoes']),
+                    'muda_signo_em_breve': resultado_planeta['tempo_no_signo']['dias_restantes'] <= 90
+                }
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro PLANETA ESPECÍFICO: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
+
 
 # ============ EXECUÇÃO ============
 
 if __name__ == "__main__":
-    print("🌟 API Astrológica Profissional v2.0 - OTIMIZADA")
+    print("🌟 API Astrológica Profissional v2.0 - OTIMIZADA + TRÂNSITOS MÍNIMOS")
     print("⚡ Recursos implementados:")
     print("  ✅ Análise completa de trânsitos")
-    print("  ✅ Output otimizado para LLMs")
+    print("  ✅ Output MÍNIMO para trânsitos específicos (90% menor)")
     print("  ✅ Priorização por relevância")
     print("  ✅ Casas ativadas com datas precisas")
     print("  ✅ Aspectos com orbe de 5 graus")
@@ -2803,11 +3132,13 @@ if __name__ == "__main__":
     print("  ✅ Período de análise: 12 meses")
     print("  ✅ Análise de trânsitos específicos")
     print("  ✅ Mudanças de signo próximas")
-    print("  ✅ Compatível com limite de tokens do Gemini")
+    print("  ✅ Compatível com limite de tokens do Claude")
     print("")
     print("🚀 Endpoints disponíveis:")
-    print("  📊 /astro-completo-nasa (principal - otimizado)")
-    print("  🔍 /planetas-individualizados (IDEAL para consultas específicas)")
+    print("  🎯 /transitos-minimo (RECOMENDADO - output mínimo)")
+    print("  🔍 /planeta-especifico-minimo (análise de 1 planeta específico)")
+    print("  📊 /astro-completo-nasa (análise completa otimizada)")
+    print("  🔍 /planetas-individualizados (dados organizados por planeta)")
     print("  🎯 /transito-especifico (análise específica quando já sabe o planeta)")
     print("  🤖 /astro-completo-gemini (versão específica para Gemini)")
     print("  📈 /verificar-tamanho (verificação de tokens)")
@@ -2816,8 +3147,9 @@ if __name__ == "__main__":
     print("")
     print("📄 Docs: http://localhost:8000/docs")
     print("🔍 Health: http://localhost:8000/health")
-    print("⚠️  IMPORTANTE: Endpoint principal agora é otimizado por padrão!")
-    print("💡 NOVO: /planetas-individualizados ideal para consultas específicas!")
+    print("⚠️  IMPORTANTE: Endpoint principal agora é /transitos-minimo!")
+    print("💡 NOVO: Output 90% menor para resolver problema de contexto do Claude!")
+    print("🎯 IDEAL: /planeta-especifico-minimo para análise de planetas específicos!")
     
     uvicorn.run(
         app, 
