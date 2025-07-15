@@ -2037,117 +2037,88 @@ astro_engine = AstroEngineCompleto()
 
 def criar_output_minimo_transitos(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Cria output MÍNIMO (redução de ~90%) mantendo apenas dados essenciais 
-    para LLM produzir respostas sobre trânsitos específicos.
-    
-    Filtra apenas:
-    - Planetas com relevância ≥ 5
-    - Máximo 3 casas por planeta
-    - Máximo 5 aspectos por planeta (intensidade ≥ 6)
-    - Máximo 2 retrogradações por planeta
+    Output reduzido com informações essenciais para análise de trânsitos específicos
     """
     
     todos_transitos = dados_completos.get('todos_transitos', [])
-    planetas_minimos = []
+    planetas_info = []
     
-    # Processar apenas planetas relevantes
+    # Processar apenas planetas com relevância >= 3
     for transito in todos_transitos:
         relevancia = transito.get('relevancia', 0)
-        if relevancia < 5:  # Ignorar planetas irrelevantes
+        if relevancia < 3:
             continue
             
         planeta_nome = transito.get('planeta')
         if not planeta_nome:
             continue
         
-        # DADOS BÁSICOS (mínimo necessário)
-        planeta_basico = {
+        # Dados básicos do planeta
+        planeta_data = {
             'planeta': planeta_nome,
-            'signo': transito.get('signo_atual'),
-            'grau': transito.get('grau_atual'),
+            'signo_atual': transito.get('signo_atual'),
+            'grau_atual': transito.get('grau_atual'),
             'retrogrado': transito.get('eh_retrogrado', False)
         }
         
-        # CASAS ATIVADAS (máximo 3, dados essenciais)
+        # CASAS ATIVADAS (todas as casas com datas)
         analise_signo = transito.get('analise_signo_atual', {})
-        casas_originais = analise_signo.get('casas_ativadas', [])
+        casas_ativadas = analise_signo.get('casas_ativadas', [])
         
-        casas_minimas = []
-        for casa in casas_originais[:3]:  # Máximo 3 casas
-            casas_minimas.append({
+        planeta_data['casas_ativadas'] = []
+        for casa in casas_ativadas:
+            planeta_data['casas_ativadas'].append({
                 'casa': casa.get('casa'),
-                'entrada': casa.get('data_entrada'),
-                'saida': casa.get('data_saida'),
-                'meses': round(casa.get('permanencia_meses', 0), 1)
+                'data_entrada': casa.get('data_entrada'),
+                'data_saida': casa.get('data_saida'),
+                'permanencia_meses': casa.get('permanencia_meses')
             })
         
-        # RETROGRADAÇÕES (máximo 2, dados essenciais)
-        retros_originais = transito.get('retrogradacoes', [])
-        retros_minimas = []
-        
-        for retro in retros_originais[:2]:  # Máximo 2 retrogradações
-            retros_minimas.append({
+        # RETROGRADAÇÃO (datas e signo anterior)
+        retros = transito.get('retrogradacoes', [])
+        planeta_data['retrogradacoes'] = []
+        for retro in retros:
+            planeta_data['retrogradacoes'].append({
                 'inicio': retro.get('inicio'),
                 'fim': retro.get('fim'),
-                'signo_anterior': retro.get('signo_retrogradacao'),
-                'dias': retro.get('duracao_dias', 0)
+                'signo_anterior': retro.get('signo_retrogradacao')
             })
         
-        # ASPECTOS (apenas maiores com intensidade ≥ 6, máximo 5)
-        aspectos_originais = analise_signo.get('aspectos_com_natal', [])
-        
-        # Filtrar apenas aspectos importantes
-        aspectos_importantes = [
-            asp for asp in aspectos_originais 
-            if (asp.get('tipo_aspecto') in ['conjunção', 'trígono', 'sextil', 'quadratura', 'oposição'] 
-                and asp.get('intensidade', 0) >= 6)
+        # ASPECTOS MAIORES (orbe 5 graus, período 1 ano)
+        aspectos_natais = analise_signo.get('aspectos_com_natal', [])
+        aspectos_maiores = [
+            asp for asp in aspectos_natais 
+            if asp.get('tipo_aspecto') in ['conjunção', 'trígono', 'sextil', 'quadratura', 'oposição']
+            and asp.get('intensidade', 0) >= 5
         ]
         
-        # Ordenar por intensidade e pegar top 5
-        aspectos_importantes.sort(key=lambda x: x.get('intensidade', 0), reverse=True)
-        
-        aspectos_minimos = []
-        for aspecto in aspectos_importantes[:5]:  # Máximo 5 aspectos
-            aspectos_minimos.append({
+        planeta_data['aspectos'] = []
+        for aspecto in aspectos_maiores:
+            planeta_data['aspectos'].append({
                 'tipo': aspecto.get('tipo_aspecto'),
                 'planeta_natal': aspecto.get('planeta_natal'),
                 'casa_natal': aspecto.get('casa_natal'),
-                'inicio': aspecto.get('data_inicio'),
-                'fim': aspecto.get('data_fim'),
-                'intensidade': aspecto.get('intensidade')
+                'data_inicio': aspecto.get('data_inicio'),
+                'data_exata': aspecto.get('data_exata'),
+                'data_fim': aspecto.get('data_fim'),
+                'intensidade': aspecto.get('intensidade'),
+                'natureza': aspecto.get('natureza')
             })
         
-        # TEMPO NO SIGNO
-        tempo_signo = transito.get('tempo_restante_signo', {})
-        
-        # Montar planeta mínimo
-        planeta_minimo = {
-            'info': planeta_basico,
-            'casas': casas_minimas,
-            'retrogradacoes': retros_minimas,
-            'aspectos': aspectos_minimos,
-            'tempo_restante': {
-                'dias': tempo_signo.get('dias', 0),
-                'data_mudanca': tempo_signo.get('data_mudanca'),
-                'proximo_signo': transito.get('proximo_signo')
-            }
+        # TEMPO RESTANTE NO SIGNO
+        tempo_restante = transito.get('tempo_restante_signo', {})
+        planeta_data['tempo_restante_signo'] = {
+            'dias': tempo_restante.get('dias'),
+            'data_mudanca': tempo_restante.get('data_mudanca')
         }
         
-        planetas_minimos.append(planeta_minimo)
+        planetas_info.append(planeta_data)
     
-    # Ordenar por importância (mais aspectos + mais casas = mais importante)
-    planetas_minimos.sort(
-        key=lambda x: len(x['aspectos']) + len(x['casas']), 
-        reverse=True
-    )
-    
-    # Output final ULTRA REDUZIDO
+    # Retornar apenas planetas relevantes
     return {
-        'planetas': planetas_minimos[:6],  # Máximo 6 planetas
-        'mudancas_signo': dados_completos.get('mudancas_signo_proximas', [])[:3],  # Máximo 3
-        'periodo': '12 meses',
-        'data_analise': dados_completos.get('meta_info', {}).get('data_analise'),
-        'total_planetas_analisados': len(planetas_minimos)
+        'planetas': planetas_info[:6],
+        'periodo_analise': '12 meses',
+        'orbe_aspectos': '5 graus'
     }
 
 # ============ ENDPOINTS ============
@@ -2965,24 +2936,19 @@ async def transitos_output_minimo(data: List[Dict[str, Any]]):
         # Processar análise completa primeiro
         resultado_completo = astro_engine.processar_completo(dados_extraidos)
         
-        # Criar output MÍNIMO
+        # Criar output reduzido
         output_minimo = criar_output_minimo_transitos(resultado_completo)
         
         execution_time = round((time.time() - start_time) * 1000, 2)
         logger.info(f"✅ TRÂNSITOS MÍNIMO: Concluído em {execution_time}ms")
         
-        # Meta informações mínimas
+        # Meta informações
         output_minimo['meta'] = {
-            'tipo': 'transitos_minimo',
+            'tipo': 'transitos_reduzido',
             'tempo_ms': execution_time,
-            'reducao_tamanho': '~90% menor que output completo',
-            'ideal_para': 'Respostas sobre trânsitos específicos - padrão VI',
-            'dados_mantidos': [
-                'Casas ativadas com datas',
-                'Retrogradações com períodos', 
-                'Aspectos maiores (orbe 5°)',
-                'Tempo restante no signo'
-            ]
+            'reducao': 'Output reduzido para análise',
+            'max_planetas': 4,
+            'max_aspectos_por_planeta': 2
         }
         
         return output_minimo
@@ -3117,6 +3083,104 @@ async def planeta_especifico_minimo(request: Dict[str, Any]):
         logger.error(f"❌ Erro PLANETA ESPECÍFICO: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
+def criar_output_ultra_minimo_debug(dados_completos: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Output ULTRA MÍNIMO apenas para DEBUG
+    Foca em Urano e dados essenciais para identificar problemas
+    """
+    
+    todos_transitos = dados_completos.get('todos_transitos', [])
+    planetas_debug = []
+    
+    # Processar apenas planetas relevantes, com foco em Urano
+    for transito in todos_transitos:
+        planeta_nome = transito.get('planeta')
+        if not planeta_nome:
+            continue
+            
+        # DADOS BÁSICOS (mínimo necessário)
+        planeta_basico = {
+            'planeta': planeta_nome,
+            'signo_atual': transito.get('signo_atual'),
+            'eh_retrogrado': transito.get('eh_retrogrado', False)
+        }
+        
+        # Para Urano, pegar mais detalhes
+        if planeta_nome == 'Urano':
+            planeta_basico['detalhes_urano'] = {
+                'movimento': transito.get('movimento', {}),
+                'tempo_restante_signo': transito.get('tempo_restante_signo', {}),
+                'retrogradacoes': transito.get('retrogradacoes', [])
+            }
+        
+        # CASAS ATIVADAS (apenas 1, dados mínimos)
+        analise_signo = transito.get('analise_signo_atual', {})
+        casas_originais = analise_signo.get('casas_ativadas', [])
+        
+        if casas_originais:
+            casa_principal = casas_originais[0]
+            planeta_basico['casa_principal'] = {
+                'casa': casa_principal.get('casa'),
+                'entrada': casa_principal.get('data_entrada'),
+                'saida': casa_principal.get('data_saida')
+            }
+        
+        planetas_debug.append(planeta_basico)
+    
+    # Focar apenas em planetas importantes
+    planetas_importantes = ['Urano', 'Saturno', 'Plutão', 'Netuno', 'Júpiter']
+    planetas_filtrados = [p for p in planetas_debug if p['planeta'] in planetas_importantes]
+    
+    # Output final ULTRA REDUZIDO para debug
+    return {
+        'planetas_debug': planetas_filtrados,
+        'total_planetas': len(planetas_debug),
+        'data_analise': dados_completos.get('meta_info', {}).get('data_analise'),
+        'debug_info': 'Output ultra reduzido para identificar problemas'
+    }
+
+@app.post("/debug-urano")
+async def debug_urano_output(data: List[Dict[str, Any]]):
+    """
+    🔍 ENDPOINT DEBUG PARA URANO
+    
+    Retorna apenas dados essenciais para identificar problemas
+    nos dados de Urano (datas, retrogradação, etc.)
+    """
+    start_time = time.time()
+    try:
+        logger.info(f"🔍 DEBUG URANO: Iniciando com {len(data)} elementos")
+        
+        # Extrair dados do formato N8N (mesmo padrão dos outros endpoints)
+        dados_extraidos = []
+        for item in data:
+            if isinstance(item, dict) and "json" in item:
+                dados_extraidos.append(item["json"])
+            else:
+                dados_extraidos.append(item)
+        
+        # Processar análise completa primeiro
+        resultado_completo = astro_engine.processar_completo(dados_extraidos)
+        
+        # Criar output ULTRA MÍNIMO para debug
+        output_debug = criar_output_ultra_minimo_debug(resultado_completo)
+        
+        execution_time = round((time.time() - start_time) * 1000, 2)
+        logger.info(f"✅ DEBUG URANO: Concluído em {execution_time}ms")
+        
+        # Meta informações mínimas
+        output_debug['meta'] = {
+            'tipo': 'debug_urano',
+            'tempo_ms': execution_time,
+            'objetivo': 'Identificar problemas com dados de Urano',
+            'tamanho': 'Ultra reduzido para análise'
+        }
+        
+        return output_debug
+        
+    except Exception as e:
+        logger.error(f"❌ Erro DEBUG URANO: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
 # ============ EXECUÇÃO ============
 
