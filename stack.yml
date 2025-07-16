@@ -7,6 +7,11 @@ services:
       - network_public
     deploy:
       replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
       placement:
         constraints:
           - node.role == manager
@@ -16,4 +21,8 @@ services:
         - traefik.http.routers.api-astrologica.entrypoints=websecure
         - traefik.http.routers.api-astrologica.tls.certresolver=le
         - traefik.http.services.api-astrologica.loadbalancer.server.port=8000
-        - traefik.docker.network=network_public 
+        - traefik.docker.network=network_public
+
+networks:
+  network_public:
+    external: true 
