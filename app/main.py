@@ -327,6 +327,10 @@ async def root():
         ]
     }
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "version": "3.0.0"}
+
 @app.post("/transito-especifico")
 async def analisar_transito_especifico(data: Dict[str, Any]):
     """
