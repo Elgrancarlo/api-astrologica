@@ -492,6 +492,10 @@ async def root():
         ]
     }
 
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "message": "API funcionando corretamente"}
+
 @app.post("/transito-especifico")
 async def transito_especifico(data: Dict[str, Any]):
     """Análise de 1 planeta específico usando PyEphem"""
