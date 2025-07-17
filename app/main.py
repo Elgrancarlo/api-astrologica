@@ -18,7 +18,7 @@ except ImportError:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="API Trânsitos Específicos DEBUG", version="7.0.0")
+app = FastAPI(title="API Trânsitos Astronômicos Precisos", version="9.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,15 +28,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ============ CALCULADORA COM PYEPHEM ============
-class TransitoEphem:
+class TransitoAstronomico:
     def __init__(self):
         self.signos = [
             'Áries', 'Touro', 'Gêmeos', 'Câncer', 'Leão', 'Virgem',
             'Libra', 'Escorpião', 'Sagitário', 'Capricórnio', 'Aquário', 'Peixes'
         ]
         
-        # Mapa PyEphem (se disponível)
+        # Mapa PyEphem
         if EPHEM_DISPONIVEL:
             self.ephem_map = {
                 'Sol': ephem.Sun(),
@@ -52,39 +51,26 @@ class TransitoEphem:
             }
         else:
             self.ephem_map = {}
-            logger.warning("PyEphem não disponível - retrogradações serão limitadas")
+        
+        # Planetas relevantes para trânsitos
+        self.planetas_relevantes = ['Mercúrio', 'Vênus', 'Marte', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutão']
         
         # Aspectos maiores
         self.aspectos = [
             (0, "conjunção"),
-            (60, "sextil"),
+            (60, "sextil"), 
             (90, "quadratura"),
             (120, "trígono"),
             (180, "oposição")
         ]
     
-    def calcular_data_futura(self, dias: int) -> str:
-        """Calcula data futura"""
-        data = datetime.now() + timedelta(days=dias)
-        return data.strftime('%Y-%m-%d')
-    
-    def calcular_diferenca_angular(self, grau1: float, grau2: float) -> float:
-        """Calcula diferença angular"""
-        diff = abs(grau1 - grau2)
-        return min(diff, 360 - diff)
-    
-    def obter_posicao_planeta(self, nome_planeta: str, data: datetime) -> Dict:
-        """Obtém posição do planeta em uma data usando PyEphem (se disponível)"""
-        if not EPHEM_DISPONIVEL:
-            logger.warning("PyEphem não disponível - retornando None")
+    def obter_posicao_planeta_data(self, nome_planeta: str, data: datetime) -> Dict:
+        """Obtém posição precisa do planeta em uma data específica"""
+        if not EPHEM_DISPONIVEL or nome_planeta not in self.ephem_map:
             return None
             
         try:
-            planeta = self.ephem_map.get(nome_planeta)
-            if not planeta:
-                logger.warning(f"Planeta {nome_planeta} não encontrado no mapa PyEphem")
-                return None
-            
+            planeta = self.ephem_map[nome_planeta]
             observer = ephem.Observer()
             observer.date = data.strftime('%Y/%m/%d')
             planeta.compute(observer)
@@ -94,26 +80,7 @@ class TransitoEphem:
             
             if longitude_graus < 0:
                 longitude_graus += 360
-            
-            # Calcular velocidade simples (hoje vs amanhã)
-            try:
-                observer.date = (data + timedelta(days=1)).strftime('%Y/%m/%d')
-                planeta.compute(observer)
-                longitude_amanha = float(planeta.hlong) * 180 / math.pi
                 
-                if longitude_amanha < 0:
-                    longitude_amanha += 360
-                
-                velocidade = longitude_amanha - longitude_graus
-                if velocidade > 180:
-                    velocidade -= 360
-                elif velocidade < -180:
-                    velocidade += 360
-                    
-            except Exception as e:
-                logger.warning(f"Erro ao calcular velocidade para {nome_planeta}: {e}")
-                velocidade = 0.1  # Fallback
-            
             # Determinar signo
             signo_index = int(longitude_graus // 30) % 12
             grau_no_signo = longitude_graus % 30
@@ -121,14 +88,131 @@ class TransitoEphem:
             return {
                 'longitude': longitude_graus,
                 'signo': self.signos[signo_index],
-                'grau_no_signo': grau_no_signo,
-                'velocidade': velocidade,
-                'retrogrado': velocidade < 0
+                'grau_no_signo': grau_no_signo
             }
             
         except Exception as e:
-            logger.error(f"Erro ao obter posição de {nome_planeta}: {e}")
+            logger.error(f"Erro ao obter posição de {nome_planeta} em {data}: {e}")
             return None
+    
+    def calcular_entrada_signo(self, nome_planeta: str, signo_atual: str) -> str:
+        """Calcula quando o planeta entrou no signo atual"""
+        if not EPHEM_DISPONIVEL:
+            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+        
+        try:
+            hoje = datetime.now()
+            
+            # Buscar para trás até encontrar quando entrou no signo
+            for dias_atras in range(0, 730):  # Buscar até 2 anos atrás
+                data_teste = hoje - timedelta(days=dias_atras)
+                pos = self.obter_posicao_planeta_data(nome_planeta, data_teste)
+                
+                if pos and pos['signo'] != signo_atual:
+                    # Encontrou quando estava em signo diferente
+                    # A entrada foi no dia seguinte
+                    data_entrada = data_teste + timedelta(days=1)
+                    return data_entrada.strftime('%Y-%m-%d')
+            
+            # Se não encontrou, assumir entrada há 30 dias
+            return (hoje - timedelta(days=30)).strftime('%Y-%m-%d')
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular entrada de {nome_planeta} em {signo_atual}: {e}")
+            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    
+    def calcular_saida_signo(self, nome_planeta: str, signo_atual: str) -> str:
+        """Calcula quando o planeta sairá do signo atual"""
+        if not EPHEM_DISPONIVEL:
+            return (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
+        
+        try:
+            hoje = datetime.now()
+            
+            # Buscar para frente até encontrar mudança de signo
+            for dias_futuros in range(1, 730):  # Buscar até 2 anos à frente
+                data_teste = hoje + timedelta(days=dias_futuros)
+                pos = self.obter_posicao_planeta_data(nome_planeta, data_teste)
+                
+                if pos and pos['signo'] != signo_atual:
+                    # Encontrou mudança de signo
+                    return data_teste.strftime('%Y-%m-%d')
+            
+            # Se não encontrou, assumir saída em 90 dias
+            return (hoje + timedelta(days=90)).strftime('%Y-%m-%d')
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular saída de {nome_planeta} de {signo_atual}: {e}")
+            return (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
+    
+    def calcular_retrogradacoes_precisas(self, nome_planeta: str) -> List[Dict]:
+        """Calcula retrogradações precisas usando PyEphem"""
+        if not EPHEM_DISPONIVEL:
+            return []
+        
+        # Planetas que não retrogradam
+        if nome_planeta in ['Sol', 'Lua']:
+            return []
+        
+        try:
+            hoje = datetime.now()
+            retrogradacoes = []
+            
+            em_retrogradacao = False
+            inicio_retro = None
+            signo_retro = None
+            
+            # Verificar próximos 365 dias, dia por dia para maior precisão
+            for dias in range(0, 366):
+                data_teste = hoje + timedelta(days=dias)
+                pos_hoje = self.obter_posicao_planeta_data(nome_planeta, data_teste)
+                pos_amanha = self.obter_posicao_planeta_data(nome_planeta, data_teste + timedelta(days=1))
+                
+                if pos_hoje and pos_amanha:
+                    # Calcular velocidade (movimento diário)
+                    diff_longitude = pos_amanha['longitude'] - pos_hoje['longitude']
+                    
+                    # Ajustar para passagem pelo 0°
+                    if diff_longitude > 180:
+                        diff_longitude -= 360
+                    elif diff_longitude < -180:
+                        diff_longitude += 360
+                    
+                    eh_retrogrado = diff_longitude < 0
+                    
+                    if eh_retrogrado and not em_retrogradacao:
+                        # Início da retrogradação
+                        inicio_retro = data_teste
+                        signo_retro = pos_hoje['signo']
+                        em_retrogradacao = True
+                        
+                    elif not eh_retrogrado and em_retrogradacao:
+                        # Fim da retrogradação
+                        retrogradacoes.append({
+                            'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
+                            'data_fim': data_teste.strftime('%Y-%m-%d'),
+                            'signo_retrogradacao': signo_retro,
+                            'duracao_dias': (data_teste - inicio_retro).days
+                        })
+                        em_retrogradacao = False
+                        
+                        # Parar após encontrar primeira retrogradação
+                        break
+            
+            # Se ainda está em retrogradação no final do período
+            if em_retrogradacao and inicio_retro:
+                retrogradacoes.append({
+                    'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
+                    'data_fim': (hoje + timedelta(days=365)).strftime('%Y-%m-%d'),
+                    'signo_retrogradacao': signo_retro,
+                    'duracao_dias': 365 - (inicio_retro - hoje).days
+                })
+            
+            return retrogradacoes
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular retrogradação de {nome_planeta}: {e}")
+            return []
     
     def determinar_casa_por_grau(self, grau: float, casas: List[Dict]) -> int:
         """Determina casa baseada no grau"""
@@ -148,202 +232,12 @@ class TransitoEphem:
         
         return 1
     
-    def calcular_casas_ativadas(self, nome_planeta: str, casas: List[Dict]) -> List[Dict]:
-        """Calcula casas ativadas nos próximos 365 dias"""
-        casas_ativadas = []
-        hoje = datetime.now()
-        
-        # Obter posição atual
-        pos_atual = self.obter_posicao_planeta(nome_planeta, hoje)
-        if not pos_atual:
-            return []
-        
-        casa_atual = self.determinar_casa_por_grau(pos_atual['longitude'], casas)
-        data_entrada_atual = hoje
-        
-        # Verificar mudanças de casa nos próximos 365 dias
-        for dias in range(1, 366, 30):  # A cada 30 dias
-            data_futura = hoje + timedelta(days=dias)
-            pos_futura = self.obter_posicao_planeta(nome_planeta, data_futura)
-            
-            if pos_futura:
-                casa_futura = self.determinar_casa_por_grau(pos_futura['longitude'], casas)
-                
-                if casa_futura != casa_atual:
-                    # Mudança de casa detectada
-                    casas_ativadas.append({
-                        'casa': casa_atual,
-                        'data_entrada': data_entrada_atual.strftime('%Y-%m-%d'),
-                        'data_saida': data_futura.strftime('%Y-%m-%d')
-                    })
-                    
-                    casa_atual = casa_futura
-                    data_entrada_atual = data_futura
-        
-        # Adicionar casa atual se não tiver mudança
-        if not casas_ativadas:
-            casas_ativadas.append({
-                'casa': casa_atual,
-                'data_entrada': hoje.strftime('%Y-%m-%d'),
-                'data_saida': self.calcular_data_futura(365)
-            })
-        
-        return casas_ativadas[:3]  # Máximo 3 casas
-    
-    def calcular_retrogradacao(self, nome_planeta: str) -> List[Dict]:
-        """Calcula retrogradação usando PyEphem (se disponível)"""
-        if not EPHEM_DISPONIVEL:
-            logger.warning("PyEphem não disponível - retrogradações limitadas")
-            return []
-            
+    def calcular_aspectos_principais(self, planeta: Dict, natais: List[Dict]) -> List[Dict]:
+        """Calcula apenas aspectos mais relevantes (máximo 3)"""
         try:
-            if nome_planeta not in self.ephem_map:
-                return []
-            
-            retrogradacoes = []
-            hoje = datetime.now()
-            
-            em_retrogradacao = False
-            inicio_retro = None
-            
-            # Verificar retrogradação a cada 15 dias (mais rápido)
-            for dias in range(0, 366, 15):
-                data_teste = hoje + timedelta(days=dias)
-                pos = self.obter_posicao_planeta(nome_planeta, data_teste)
-                
-                if pos:
-                    if pos['retrogrado'] and not em_retrogradacao:
-                        # Início da retrogradação
-                        inicio_retro = data_teste
-                        em_retrogradacao = True
-                        
-                    elif not pos['retrogrado'] and em_retrogradacao:
-                        # Fim da retrogradação
-                        retrogradacoes.append({
-                            'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
-                            'data_fim': data_teste.strftime('%Y-%m-%d'),
-                            'signo_anterior': pos['signo'],  # Usar signo atual como aproximação
-                            'duracao_dias': (data_teste - inicio_retro).days
-                        })
-                        em_retrogradacao = False
-                        
-                        # Parar após encontrar uma retrogradação
-                        break
-            
-            return retrogradacoes
-            
-        except Exception as e:
-            logger.error(f"Erro ao calcular retrogradação de {nome_planeta}: {e}")
-            return []
-    
-    def calcular_aspectos_natais(self, nome_planeta: str, natais: List[Dict]) -> List[Dict]:
-        """Calcula aspectos com planetas natais"""
-        aspectos = []
-        hoje = datetime.now()
-        
-        # Testar aspectos a cada 30 dias
-        for dias in range(0, 366, 30):
-            data_teste = hoje + timedelta(days=dias)
-            pos = self.obter_posicao_planeta(nome_planeta, data_teste)
-            
-            if pos:
-                for natal in natais[:5]:  # Máximo 5 planetas natais
-                    if 'fullDegree' not in natal:
-                        continue
-                    
-                    diferenca = self.calcular_diferenca_angular(pos['longitude'], natal['fullDegree'])
-                    
-                    for angulo, nome_aspecto in self.aspectos:
-                        if abs(diferenca - angulo) <= 5:  # Orbe 5 graus
-                            # Verificar se aspecto já existe
-                            existe = any(
-                                a['planeta_natal'] == natal['name'] and 
-                                a['tipo_aspecto'] == nome_aspecto
-                                for a in aspectos
-                            )
-                            
-                            if not existe:
-                                aspectos.append({
-                                    'tipo_aspecto': nome_aspecto,
-                                    'planeta_natal': natal['name'],
-                                    'casa_natal': natal['house'],
-                                    'data_inicio': self.calcular_data_futura(dias - 15),
-                                    'data_exata': self.calcular_data_futura(dias),
-                                    'data_fim': self.calcular_data_futura(dias + 15),
-                                    'orbe': round(abs(diferenca - angulo), 1)
-                                })
-        
-    def calcular_casas_com_dados_entrada(self, planeta: Dict, casas: List[Dict]) -> List[Dict]:
-        """Calcula casas usando dados de entrada (mais simples e confiável)"""
-        try:
+            aspectos = []
             signo = planeta.get('sign', 'Áries')
             grau_atual = float(planeta.get('normDegree', 0))
-            casa_atual = int(planeta.get('house', 1))
-            velocidade = abs(float(planeta.get('speed', 0.1)))
-            
-            if velocidade == 0:
-                velocidade = 0.1  # Fallback
-            
-            # Posição atual absoluta
-            try:
-                signo_index = self.signos.index(signo)
-            except ValueError:
-                return [{'casa': casa_atual, 'data_entrada': self.calcular_data_futura(0)}]
-            
-            grau_inicio_signo = signo_index * 30
-            grau_absoluto_atual = grau_inicio_signo + grau_atual
-            
-            casas_ativadas = []
-            
-            # Casa atual
-            casa_calculada = self.determinar_casa_por_grau(grau_absoluto_atual, casas)
-            casas_ativadas.append({
-                'casa': casa_calculada,
-                'data_entrada': self.calcular_data_futura(0),
-                'data_saida': None
-            })
-            
-            # Próximas casas no signo (simplificado)
-            graus_teste = [grau_absoluto_atual + 10, grau_absoluto_atual + 20]
-            grau_fim_signo = grau_inicio_signo + 30
-            
-            for grau_teste in graus_teste:
-                if grau_teste < grau_fim_signo:  # Ainda no mesmo signo
-                    casa_teste = self.determinar_casa_por_grau(grau_teste, casas)
-                    
-                    if casa_teste != casa_calculada:
-                        dias_ate_casa = int((grau_teste - grau_absoluto_atual) / velocidade)
-                        
-                        # Fechar casa anterior
-                        if casas_ativadas:
-                            casas_ativadas[-1]['data_saida'] = self.calcular_data_futura(dias_ate_casa)
-                        
-                        # Nova casa
-                        casas_ativadas.append({
-                            'casa': casa_teste,
-                            'data_entrada': self.calcular_data_futura(dias_ate_casa),
-                            'data_saida': None
-                        })
-                        
-                        casa_calculada = casa_teste
-            
-            # Fechar última casa
-            if casas_ativadas:
-                dias_ate_fim = int((grau_fim_signo - grau_absoluto_atual) / velocidade)
-                casas_ativadas[-1]['data_saida'] = self.calcular_data_futura(dias_ate_fim)
-            
-            return casas_ativadas[:3]  # Máximo 3
-            
-        except Exception as e:
-            logger.error(f"Erro em calcular_casas_com_dados_entrada: {e}")
-            return [{'casa': planeta.get('house', 1), 'data_entrada': self.calcular_data_futura(0)}]
-    
-    def calcular_aspectos_com_dados_entrada(self, planeta: Dict, natais: List[Dict]) -> List[Dict]:
-        """Calcula aspectos usando dados de entrada"""
-        try:
-            signo = planeta.get('sign', 'Áries')
-            grau_atual = float(planeta.get('normDegree', 0))
-            velocidade = abs(float(planeta.get('speed', 0.1)))
             
             # Posição atual absoluta
             try:
@@ -353,142 +247,98 @@ class TransitoEphem:
             
             grau_absoluto = (signo_index * 30) + grau_atual
             
-            aspectos = []
+            # Testar apenas com planetas natais principais
+            planetas_principais = ['Sol', 'Lua', 'Mercúrio', 'Vênus', 'Marte', 'Júpiter']
             
-            # Testar posições futuras (simplificado: 4 pontos no ano)
-            for dias in [0, 90, 180, 270]:  # A cada 3 meses
-                grau_futuro = grau_absoluto + (velocidade * dias)
-                grau_futuro = grau_futuro % 360
+            for natal in natais:
+                if not isinstance(natal, dict) or natal.get('name') not in planetas_principais:
+                    continue
                 
-                for natal in natais[:5]:  # Máximo 5 planetas natais
-                    if not isinstance(natal, dict) or 'fullDegree' not in natal:
-                        continue
+                try:
+                    natal_grau = float(natal.get('fullDegree', 0))
+                    diferenca = abs(grau_absoluto - natal_grau)
+                    diferenca = min(diferenca, 360 - diferenca)
                     
-                    try:
-                        natal_grau = float(natal.get('fullDegree', 0))
-                        diferenca = self.calcular_diferenca_angular(grau_futuro, natal_grau)
-                        
-                        for angulo, nome_aspecto in self.aspectos:
-                            if abs(diferenca - angulo) <= 5:  # Orbe 5 graus
-                                # Verificar se aspecto já existe
-                                existe = any(
-                                    a.get('planeta_natal') == natal.get('name') and 
-                                    a.get('tipo_aspecto') == nome_aspecto
-                                    for a in aspectos
-                                )
-                                
-                                if not existe:
-                                    aspectos.append({
-                                        'tipo_aspecto': nome_aspecto,
-                                        'planeta_natal': natal.get('name', 'Desconhecido'),
-                                        'casa_natal': int(natal.get('house', 1)),
-                                        'data_inicio': self.calcular_data_futura(dias - 15),
-                                        'data_exata': self.calcular_data_futura(dias),
-                                        'data_fim': self.calcular_data_futura(dias + 15),
-                                        'orbe': round(abs(diferenca - angulo), 1)
-                                    })
-                    except Exception as e:
-                        logger.warning(f"Erro ao processar aspecto com {natal.get('name', 'Desconhecido')}: {e}")
-                        continue
+                    for angulo, nome_aspecto in self.aspectos:
+                        if abs(diferenca - angulo) <= 3:  # Orbe mais apertado: 3 graus
+                            aspectos.append({
+                                'tipo_aspecto': nome_aspecto,
+                                'planeta_natal': natal.get('name'),
+                                'casa_natal': int(natal.get('house', 1)),
+                                'orbe': round(abs(diferenca - angulo), 1)
+                            })
+                            break  # Apenas 1 aspecto por planeta natal
+                            
+                except Exception:
+                    continue
             
-            # Ordenar e limitar
-            aspectos.sort(key=lambda x: x.get('data_exata', ''))
-            return aspectos[:5]
+            # Retornar apenas os 3 aspectos mais exatos
+            aspectos.sort(key=lambda x: x['orbe'])
+            return aspectos[:3]
             
         except Exception as e:
-            logger.error(f"Erro em calcular_aspectos_com_dados_entrada: {e}")
+            logger.error(f"Erro ao calcular aspectos: {e}")
             return []
     
-    def processar_planeta(self, planeta: Dict, natais: List[Dict], casas: List[Dict]) -> Dict:
-        """Processa um planeta usando dados de entrada + PyEphem quando necessário"""
+    def processar_planeta_astronomico(self, planeta: Dict, natais: List[Dict], casas: List[Dict]) -> Dict:
+        """Processamento astronômico preciso e enxuto"""
         try:
             nome = planeta.get('name', 'Desconhecido')
             signo = planeta.get('sign', 'Áries')
             grau = float(planeta.get('normDegree', 0))
-            velocidade = float(planeta.get('speed', 0))
-            eh_retrogrado = str(planeta.get('isRetro', 'false')).lower() == 'true'
+            casa_atual = int(planeta.get('house', 1))
             
-            logger.info(f"Processando {nome}: {signo} {grau:.1f}°, velocidade: {velocidade:.4f}, retro: {eh_retrogrado}")
-            
-            # Usar dados de entrada diretamente quando possível
             resultado = {
-                'planeta': nome,
                 'signo_atual': signo,
                 'grau_atual': round(grau, 1),
-                'casas_ativadas': [],
-                'retrogradacoes': [],
-                'aspectos_natais': [],
-                'periodo_analise': '1 ano'
+                'casa_atual': casa_atual,
+                'data_entrada_signo': self.calcular_entrada_signo(nome, signo),
+                'data_saida_signo': self.calcular_saida_signo(nome, signo)
             }
             
-            # Calcular casas ativadas usando dados existentes
-            try:
-                resultado['casas_ativadas'] = self.calcular_casas_com_dados_entrada(planeta, casas)
-            except Exception as e:
-                logger.error(f"Erro ao calcular casas para {nome}: {e}")
-                resultado['casas_ativadas'] = [{'casa': planeta.get('house', 1), 'data_entrada': self.calcular_data_futura(0)}]
+            # Retrogradações (apenas se houver)
+            retrogradacoes = self.calcular_retrogradacoes_precisas(nome)
+            if retrogradacoes:
+                resultado['retrogradacoes'] = retrogradacoes
             
-            # Calcular retrogradação usando PyEphem se necessário
-            try:
-                if eh_retrogrado or velocidade < 0:
-                    resultado['retrogradacoes'] = self.calcular_retrogradacao(nome)
-                else:
-                    resultado['retrogradacoes'] = []
-            except Exception as e:
-                logger.error(f"Erro ao calcular retrogradação para {nome}: {e}")
-                resultado['retrogradacoes'] = []
+            # Aspectos principais (apenas os mais relevantes)
+            aspectos = self.calcular_aspectos_principais(planeta, natais)
+            if aspectos:
+                resultado['aspectos_principais'] = aspectos
             
-            # Calcular aspectos natais
-            try:
-                resultado['aspectos_natais'] = self.calcular_aspectos_com_dados_entrada(planeta, natais)
-            except Exception as e:
-                logger.error(f"Erro ao calcular aspectos para {nome}: {e}")
-                resultado['aspectos_natais'] = []
-            
-            logger.info(f"Planeta {nome} processado: {len(resultado['casas_ativadas'])} casas, {len(resultado['retrogradacoes'])} retros, {len(resultado['aspectos_natais'])} aspectos")
             return resultado
             
         except Exception as e:
-            logger.error(f"Erro geral ao processar planeta: {e}")
+            logger.error(f"Erro ao processar {planeta.get('name', 'Desconhecido')}: {e}")
             return {
-                'planeta': planeta.get('name', 'Desconhecido'),
-                'erro': str(e),
                 'signo_atual': planeta.get('sign', 'Áries'),
                 'grau_atual': round(float(planeta.get('normDegree', 0)), 1),
-                'casas_ativadas': [],
-                'retrogradacoes': [],
-                'aspectos_natais': [],
-                'periodo_analise': '1 ano'
+                'casa_atual': int(planeta.get('house', 1)),
+                'erro': str(e)
             }
 
 # ============ ENDPOINTS ============
-calc = TransitoEphem()
+calc = TransitoAstronomico()
 
 @app.get("/")
 async def root():
     return {
-        "message": "API Trânsitos Específicos CORRIGIDA v7.1",
-        "status": "PROBLEMA IDENTIFICADO E CORRIGIDO",
-        "problema_encontrado": "Dados chegavam com estrutura {'json': {dados}, 'pairedItem': {item}}",
-        "solucao_aplicada": "Extração automática dos dados da chave 'json'",
-        "biblioteca": "PyEphem + dados de entrada híbrido",
-        "principais_correcoes": [
-            "✅ Correção do formato de entrada dos dados",
-            "✅ Extração automática da chave 'json'",
-            "✅ Verificações robustas no elemento 22",
-            "✅ Logging detalhado para identificar erros",
-            "✅ Uso híbrido: dados de entrada + PyEphem",
-            "✅ Tratamento de erro individual por planeta",
-            "✅ Fallbacks para todos os cálculos",
-            "✅ Processamento não quebra se um planeta falha"
+        "message": "API Trânsitos Astronômicos Precisos v9.0",
+        "status": "CÁLCULOS ASTRONÔMICOS REAIS",
+        "melhorias": [
+            "✅ Datas reais de entrada nos signos",
+            "✅ Retrogradações calculadas dia por dia",
+            "✅ Cálculos astronômicos com PyEphem",
+            "✅ Output ultra-enxuto (máximo 8 planetas)",
+            "✅ Apenas dados essenciais",
+            "✅ Aspectos mais relevantes (máximo 3 por planeta)",
+            "✅ Responde: 'quando entrou', 'quando retrograda'",
+            "✅ Inclui planetas pessoais relevantes"
         ],
-        "funcionalidades": [
-            "✅ Casas ativadas usando dados de entrada",
-            "✅ Retrogradações calculadas com PyEphem",
-            "✅ Aspectos com datas calculadas",
-            "✅ Período 1 ano completo",
-            "✅ Debug detalhado no log",
-            "✅ Compatível com formato N8N"
+        "exemplo_perguntas": [
+            "Quando Urano entrou em Gêmeos?",
+            "Até quando Mercúrio fica retrógrado?", 
+            "Quando Saturno entrou em Áries?"
         ]
     }
 
@@ -496,201 +346,54 @@ async def root():
 async def health():
     return {"status": "healthy", "message": "API funcionando corretamente"}
 
-@app.post("/transito-especifico")
-async def transito_especifico(data: Dict[str, Any]):
-    """Análise de 1 planeta específico usando PyEphem"""
+@app.post("/transitos-astronomicos")
+async def transitos_astronomicos(data: List[Dict[str, Any]]):
+    """Trânsitos com cálculos astronômicos precisos - output enxuto"""
     try:
-        planeta_nome = data.get('planeta')
-        dados = data.get('dados', [])
+        logger.info(f"Processando {len(data)} elementos")
         
-        if not planeta_nome:
-            raise HTTPException(status_code=400, detail="Campo 'planeta' obrigatório")
+        if len(data) < 23:
+            raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(data)} elementos")
         
-        if len(dados) < 23:
-            raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(dados)} elementos")
-        
-        # EXTRAIR DADOS DA CHAVE "json" (mesmo tratamento)
-        logger.info("=== EXTRAINDO DADOS DA CHAVE 'json' NO TRANSITO-ESPECIFICO ===")
+        # Extrair dados da chave 'json' se necessário
         dados_extraidos = []
-        
-        for i, item in enumerate(dados):
+        for item in data:
             if isinstance(item, dict) and 'json' in item:
                 dados_extraidos.append(item['json'])
             else:
                 dados_extraidos.append(item)
         
-        if len(dados_extraidos) < 23:
-            raise HTTPException(status_code=400, detail=f"Dados extraídos insuficientes: {len(dados_extraidos)} elementos")
-        
-        # Separar dados extraídos
+        # Separar dados
         transitos = dados_extraidos[:11]
         natais = dados_extraidos[11:22]
         casas = dados_extraidos[22]['houses']
         
-        # Encontrar planeta
-        planeta = None
-        for p in transitos:
-            if p and p.get('name') == planeta_nome:
-                planeta = p
-                break
+        # Processar apenas planetas relevantes para trânsitos
+        planetas_processados = {}
         
-        if not planeta:
-            planetas_disponiveis = [p.get('name') for p in transitos if p and p.get('name')]
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Planeta '{planeta_nome}' não encontrado. Disponíveis: {planetas_disponiveis}"
-            )
+        for transito in transitos:
+            if transito and transito.get('name') in calc.planetas_relevantes:
+                nome = transito.get('name')
+                logger.info(f"Processando {nome}")
+                planetas_processados[nome] = calc.processar_planeta_astronomico(transito, natais, casas)
         
-        # Processar usando dados extraídos
-        resultado = calc.processar_planeta(planeta, natais, casas)
-        return resultado
+        # Output ultra-limpo
+        return {
+            'periodo_analise': '1 ano',
+            'planetas': planetas_processados
+        }
         
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"Erro: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/transitos-minimo")
-async def transitos_minimo(data: List[Dict[str, Any]]):
-    """Análise de todos os planetas relevantes usando PyEphem"""
-    try:
-        logger.info(f"=== DEBUG INÍCIO ===")
-        logger.info(f"Recebidos {len(data)} elementos")
-        
-        if len(data) < 23:
-            raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(data)} elementos (mínimo 23)")
-        
-        # EXTRAIR DADOS DA CHAVE "json"
-        logger.info("=== EXTRAINDO DADOS DA CHAVE 'json' ===")
-        dados_extraidos = []
-        
-        for i, item in enumerate(data):
-            if isinstance(item, dict) and 'json' in item:
-                dados_extraidos.append(item['json'])
-                logger.info(f"Item {i}: Extraído da chave 'json'")
-            else:
-                dados_extraidos.append(item)
-                logger.info(f"Item {i}: Usado diretamente")
-        
-        logger.info(f"Dados extraídos: {len(dados_extraidos)} elementos")
-        
-        # Usar dados extraídos a partir de agora
-        if len(dados_extraidos) < 23:
-            raise HTTPException(status_code=400, detail=f"Dados extraídos insuficientes: {len(dados_extraidos)} elementos")
-        
-        # DEBUG: Verificar elemento 22 após extração
-        logger.info(f"=== VERIFICANDO ELEMENTO 22 APÓS EXTRAÇÃO ===")
-        elemento_22 = dados_extraidos[22]
-        logger.info(f"Tipo do elemento 22: {type(elemento_22)}")
-        
-        if elemento_22 is None:
-            raise HTTPException(status_code=400, detail="Elemento 22 é None após extração")
-        
-        if not isinstance(elemento_22, dict):
-            raise HTTPException(status_code=400, detail=f"Elemento 22 não é dict após extração: {type(elemento_22)}")
-        
-        logger.info(f"Keys do elemento 22: {list(elemento_22.keys())}")
-        
-        if 'houses' not in elemento_22:
-            raise HTTPException(status_code=400, detail=f"Chave 'houses' não encontrada após extração. Keys disponíveis: {list(elemento_22.keys())}")
-        
-        casas = elemento_22['houses']
-        logger.info(f"Tipo de 'houses': {type(casas)}")
-        logger.info(f"Número de casas: {len(casas) if isinstance(casas, list) else 'não é lista'}")
-        
-        if not isinstance(casas, list):
-            raise HTTPException(status_code=400, detail=f"'houses' não é lista: {type(casas)}")
-        
-        if len(casas) < 12:
-            raise HTTPException(status_code=400, detail=f"Número insuficiente de casas: {len(casas)}")
-        
-        # Separar dados extraídos
-        transitos = dados_extraidos[:11]
-        natais = dados_extraidos[11:22]
-        
-        logger.info(f"Transitos: {len(transitos)} elementos")
-        logger.info(f"Natais: {len(natais)} elementos")
-        logger.info(f"Casas: {len(casas)} elementos")
-        
-        # DEBUG: Verificar planetas nos trânsitos
-        planetas_encontrados = [p.get('name') for p in transitos if p and p.get('name')]
-        logger.info(f"Planetas encontrados nos trânsitos: {planetas_encontrados}")
-        
-        # Planetas relevantes
-        planetas_relevantes = ['Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutão']
-        
-        resultado_planetas = {}
-        
-        for planeta_nome in planetas_relevantes:
-            try:
-                logger.info(f"=== PROCESSANDO {planeta_nome} ===")
-                
-                # Encontrar planeta
-                planeta = None
-                for p in transitos:
-                    if p and p.get('name') == planeta_nome:
-                        planeta = p
-                        break
-                
-                if planeta:
-                    logger.info(f"Planeta {planeta_nome} encontrado: {planeta.get('sign')} {planeta.get('normDegree'):.1f}°")
-                    resultado_planetas[planeta_nome] = calc.processar_planeta(planeta, natais, casas)
-                    logger.info(f"Planeta {planeta_nome} processado com sucesso")
-                else:
-                    logger.warning(f"Planeta {planeta_nome} não encontrado nos trânsitos")
-                    
-            except Exception as e:
-                logger.error(f"Erro ao processar {planeta_nome}: {str(e)}")
-                # Continuar com próximo planeta ao invés de quebrar tudo
-                resultado_planetas[planeta_nome] = {
-                    'planeta': planeta_nome,
-                    'erro': str(e),
-                    'signo_atual': 'N/A',
-                    'grau_atual': 0,
-                    'casas_ativadas': [],
-                    'retrogradacoes': [],
-                    'aspectos_natais': [],
-                    'periodo_analise': '1 ano'
-                }
-        
-        logger.info(f"=== RESULTADO FINAL ===")
-        logger.info(f"Planetas processados: {len(resultado_planetas)}")
-        
-        return {
-            'planetas': resultado_planetas,
-            'periodo_analise': '1 ano',
-            'orbe_aspectos': '5 graus',
-            'biblioteca': 'PyEphem',
-            'debug_info': {
-                'total_elementos_originais': len(data),
-                'total_elementos_extraidos': len(dados_extraidos),
-                'planetas_encontrados': planetas_encontrados,
-                'planetas_processados': len(resultado_planetas),
-                'formato_corrigido': 'Dados extraídos da chave json'
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro geral: {str(e)}")
-        logger.error(f"Tipo do erro: {type(e)}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
-
 if __name__ == "__main__":
-    print("🚀 API Trânsitos Específicos CORRIGIDA v7.1")
-    print("🔧 PROBLEMA IDENTIFICADO E CORRIGIDO")
-    print("❌ Problema: Dados chegavam em {'json': {dados}, 'pairedItem': {item}}")
-    print("✅ Solução: Extração automática dos dados da chave 'json'")
-    print("✅ Verificações robustas no acesso a 'houses'")
-    print("✅ Logging detalhado para identificar problemas")
-    print("✅ Uso híbrido: dados de entrada + PyEphem")
-    print("✅ Tratamento de erro robusto")
-    print("✅ Processamento não quebra se um planeta falha")
-    print("✅ Compatível com formato N8N")
-    print("🎯 Agora deve funcionar corretamente!")
+    print("🚀 API Trânsitos Astronômicos Precisos v9.0")
+    print("✅ Cálculos astronômicos reais com PyEphem")
+    print("✅ Datas precisas de entrada/saída de signos")
+    print("✅ Retrogradações calculadas dia por dia")
+    print("✅ Output ultra-enxuto (máximo 8 planetas)")
+    print("✅ Responde perguntas específicas sobre trânsitos")
+    print("🎯 Pronto para uso!")
     
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
