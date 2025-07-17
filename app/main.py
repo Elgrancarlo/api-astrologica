@@ -467,10 +467,14 @@ calc = TransitoEphem()
 @app.get("/")
 async def root():
     return {
-        "message": "API Trânsitos Específicos DEBUG v7.0",
-        "status": "CÓDIGO CORRIGIDO COM DEBUG DETALHADO",
+        "message": "API Trânsitos Específicos CORRIGIDA v7.1",
+        "status": "PROBLEMA IDENTIFICADO E CORRIGIDO",
+        "problema_encontrado": "Dados chegavam com estrutura {'json': {dados}, 'pairedItem': {item}}",
+        "solucao_aplicada": "Extração automática dos dados da chave 'json'",
         "biblioteca": "PyEphem + dados de entrada híbrido",
         "principais_correcoes": [
+            "✅ Correção do formato de entrada dos dados",
+            "✅ Extração automática da chave 'json'",
             "✅ Verificações robustas no elemento 22",
             "✅ Logging detalhado para identificar erros",
             "✅ Uso híbrido: dados de entrada + PyEphem",
@@ -483,13 +487,10 @@ async def root():
             "✅ Retrogradações calculadas com PyEphem",
             "✅ Aspectos com datas calculadas",
             "✅ Período 1 ano completo",
-            "✅ Debug detalhado no log"
+            "✅ Debug detalhado no log",
+            "✅ Compatível com formato N8N"
         ]
     }
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
 
 @app.post("/transito-especifico")
 async def transito_especifico(data: Dict[str, Any]):
@@ -502,27 +503,46 @@ async def transito_especifico(data: Dict[str, Any]):
             raise HTTPException(status_code=400, detail="Campo 'planeta' obrigatório")
         
         if len(dados) < 23:
-            raise HTTPException(status_code=400, detail="Dados insuficientes")
+            raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(dados)} elementos")
         
-        # Separar dados
-        transitos = dados[:11]
-        natais = dados[11:22]
-        casas = dados[22]['houses']
+        # EXTRAIR DADOS DA CHAVE "json" (mesmo tratamento)
+        logger.info("=== EXTRAINDO DADOS DA CHAVE 'json' NO TRANSITO-ESPECIFICO ===")
+        dados_extraidos = []
+        
+        for i, item in enumerate(dados):
+            if isinstance(item, dict) and 'json' in item:
+                dados_extraidos.append(item['json'])
+            else:
+                dados_extraidos.append(item)
+        
+        if len(dados_extraidos) < 23:
+            raise HTTPException(status_code=400, detail=f"Dados extraídos insuficientes: {len(dados_extraidos)} elementos")
+        
+        # Separar dados extraídos
+        transitos = dados_extraidos[:11]
+        natais = dados_extraidos[11:22]
+        casas = dados_extraidos[22]['houses']
         
         # Encontrar planeta
         planeta = None
         for p in transitos:
-            if p['name'] == planeta_nome:
+            if p and p.get('name') == planeta_nome:
                 planeta = p
                 break
         
         if not planeta:
-            raise HTTPException(status_code=404, detail=f"Planeta {planeta_nome} não encontrado")
+            planetas_disponiveis = [p.get('name') for p in transitos if p and p.get('name')]
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Planeta '{planeta_nome}' não encontrado. Disponíveis: {planetas_disponiveis}"
+            )
         
-        # Processar usando PyEphem
+        # Processar usando dados extraídos
         resultado = calc.processar_planeta(planeta, natais, casas)
         return resultado
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Erro: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -537,21 +557,39 @@ async def transitos_minimo(data: List[Dict[str, Any]]):
         if len(data) < 23:
             raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(data)} elementos (mínimo 23)")
         
-        # DEBUG: Verificar elemento 22 detalhadamente
-        logger.info(f"=== VERIFICANDO ELEMENTO 22 ===")
-        elemento_22 = data[22]
+        # EXTRAIR DADOS DA CHAVE "json"
+        logger.info("=== EXTRAINDO DADOS DA CHAVE 'json' ===")
+        dados_extraidos = []
+        
+        for i, item in enumerate(data):
+            if isinstance(item, dict) and 'json' in item:
+                dados_extraidos.append(item['json'])
+                logger.info(f"Item {i}: Extraído da chave 'json'")
+            else:
+                dados_extraidos.append(item)
+                logger.info(f"Item {i}: Usado diretamente")
+        
+        logger.info(f"Dados extraídos: {len(dados_extraidos)} elementos")
+        
+        # Usar dados extraídos a partir de agora
+        if len(dados_extraidos) < 23:
+            raise HTTPException(status_code=400, detail=f"Dados extraídos insuficientes: {len(dados_extraidos)} elementos")
+        
+        # DEBUG: Verificar elemento 22 após extração
+        logger.info(f"=== VERIFICANDO ELEMENTO 22 APÓS EXTRAÇÃO ===")
+        elemento_22 = dados_extraidos[22]
         logger.info(f"Tipo do elemento 22: {type(elemento_22)}")
         
         if elemento_22 is None:
-            raise HTTPException(status_code=400, detail="Elemento 22 é None")
+            raise HTTPException(status_code=400, detail="Elemento 22 é None após extração")
         
         if not isinstance(elemento_22, dict):
-            raise HTTPException(status_code=400, detail=f"Elemento 22 não é dict: {type(elemento_22)}")
+            raise HTTPException(status_code=400, detail=f"Elemento 22 não é dict após extração: {type(elemento_22)}")
         
         logger.info(f"Keys do elemento 22: {list(elemento_22.keys())}")
         
         if 'houses' not in elemento_22:
-            raise HTTPException(status_code=400, detail=f"Chave 'houses' não encontrada. Keys disponíveis: {list(elemento_22.keys())}")
+            raise HTTPException(status_code=400, detail=f"Chave 'houses' não encontrada após extração. Keys disponíveis: {list(elemento_22.keys())}")
         
         casas = elemento_22['houses']
         logger.info(f"Tipo de 'houses': {type(casas)}")
@@ -563,9 +601,9 @@ async def transitos_minimo(data: List[Dict[str, Any]]):
         if len(casas) < 12:
             raise HTTPException(status_code=400, detail=f"Número insuficiente de casas: {len(casas)}")
         
-        # Separar dados
-        transitos = data[:11]
-        natais = data[11:22]
+        # Separar dados extraídos
+        transitos = dados_extraidos[:11]
+        natais = dados_extraidos[11:22]
         
         logger.info(f"Transitos: {len(transitos)} elementos")
         logger.info(f"Natais: {len(natais)} elementos")
@@ -621,9 +659,11 @@ async def transitos_minimo(data: List[Dict[str, Any]]):
             'orbe_aspectos': '5 graus',
             'biblioteca': 'PyEphem',
             'debug_info': {
-                'total_elementos': len(data),
+                'total_elementos_originais': len(data),
+                'total_elementos_extraidos': len(dados_extraidos),
                 'planetas_encontrados': planetas_encontrados,
-                'planetas_processados': len(resultado_planetas)
+                'planetas_processados': len(resultado_planetas),
+                'formato_corrigido': 'Dados extraídos da chave json'
             }
         }
         
@@ -637,13 +677,16 @@ async def transitos_minimo(data: List[Dict[str, Any]]):
         raise HTTPException(status_code=500, detail=f"Erro interno: {str(e)}")
 
 if __name__ == "__main__":
-    print("🚀 API Trânsitos Específicos DEBUG v7.0")
-    print("🔍 CÓDIGO CORRIGIDO COM DEBUG DETALHADO")
+    print("🚀 API Trânsitos Específicos CORRIGIDA v7.1")
+    print("🔧 PROBLEMA IDENTIFICADO E CORRIGIDO")
+    print("❌ Problema: Dados chegavam em {'json': {dados}, 'pairedItem': {item}}")
+    print("✅ Solução: Extração automática dos dados da chave 'json'")
     print("✅ Verificações robustas no acesso a 'houses'")
     print("✅ Logging detalhado para identificar problemas")
     print("✅ Uso híbrido: dados de entrada + PyEphem")
     print("✅ Tratamento de erro robusto")
     print("✅ Processamento não quebra se um planeta falha")
-    print("🔧 Agora deve identificar exatamente onde está o erro")
+    print("✅ Compatível com formato N8N")
+    print("🎯 Agora deve funcionar corretamente!")
     
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
