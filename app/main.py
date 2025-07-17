@@ -80,13 +80,13 @@ class TransitoAstrologicoPreciso:
                 'Plutão': ephem.Pluto()
             }
         
-        # Aspectos maiores com orbes corretos
+        # Aspectos maiores com orbe padronizada
         self.aspectos = [
-            (0, "conjunção", 8),      # Orbe 8°
-            (60, "sextil", 6),        # Orbe 6°
-            (90, "quadratura", 8),    # Orbe 8°
-            (120, "trígono", 8),      # Orbe 8°
-            (180, "oposição", 8)      # Orbe 8°
+            (0, "conjunção", 5),      # Orbe 5°
+            (60, "sextil", 5),        # Orbe 5°
+            (90, "quadratura", 5),    # Orbe 5°
+            (120, "trígono", 5),      # Orbe 5°
+            (180, "oposição", 5)      # Orbe 5°
         ]
         
         # Planetas relevantes para trânsitos
@@ -195,12 +195,27 @@ class TransitoAstrologicoPreciso:
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     
     def calcular_saida_signo_precisa(self, planeta: str, signo_atual: str) -> str:
-        """Calcula saída do signo usando bibliotecas astronômicas"""
+        """Calcula saída do signo com períodos adequados por planeta"""
+        
+        # Períodos aproximados por planeta (em dias)
+        periodos_maximos = {
+            'Mercúrio': 120,     # ~4 meses
+            'Vênus': 300,        # ~10 meses  
+            'Marte': 700,        # ~2 anos
+            'Júpiter': 4000,     # ~11 anos
+            'Saturno': 10000,    # ~29 anos
+            'Urano': 30000,      # ~84 anos
+            'Netuno': 60000,     # ~165 anos
+            'Plutão': 90000      # ~248 anos
+        }
+        
+        limite_dias = periodos_maximos.get(planeta, 1000)
+        
         try:
             hoje = datetime.now()
             
             # Buscar para frente até encontrar mudança de signo
-            for dias_futuros in range(1, 1000):  # Buscar até ~3 anos
+            for dias_futuros in range(1, limite_dias):
                 data_teste = hoje + timedelta(days=dias_futuros)
                 
                 # Tentar Swiss Ephemeris primeiro
@@ -212,12 +227,12 @@ class TransitoAstrologicoPreciso:
                     # Encontrou mudança - refinar a data
                     return self.refinar_data_mudanca_signo(planeta, data_teste - timedelta(days=1), data_teste)
             
-            # Se não encontrou, retornar estimativa
-            return (hoje + timedelta(days=365)).strftime('%Y-%m-%d')
+            # Se não encontrou, estimar baseado no período máximo
+            return (hoje + timedelta(days=limite_dias)).strftime('%Y-%m-%d')
             
         except Exception as e:
             logger.error(f"Erro ao calcular saída precisa: {e}")
-            return (datetime.now() + timedelta(days=365)).strftime('%Y-%m-%d')
+            return (datetime.now() + timedelta(days=limite_dias)).strftime('%Y-%m-%d')
     
     def refinar_data_mudanca_signo(self, planeta: str, data_antes: datetime, data_depois: datetime) -> str:
         """Refina a data exata de mudança de signo"""
@@ -250,7 +265,7 @@ class TransitoAstrologicoPreciso:
             return data_depois.strftime('%Y-%m-%d')
     
     def detectar_retrogradacao_precisa(self, planeta: str) -> List[Dict]:
-        """Detecta retrogradações usando cálculos astronômicos reais"""
+        """Detecta retrogradações com destino detalhado"""
         try:
             if planeta in ['Sol', 'Lua']:
                 return []
@@ -277,11 +292,19 @@ class TransitoAstrologicoPreciso:
                     em_retrogradacao = True
                     
                 elif not eh_retrogrado and em_retrogradacao:
-                    # Fim da retrogradação
+                    # Fim da retrogradação - calcular destino
+                    pos_final = self.calcular_posicao_planeta_swisseph(planeta, data_teste)
+                    if not pos_final:
+                        pos_final = self.calcular_posicao_planeta_ephem(planeta, data_teste)
+                    
+                    casa_final = self.calcular_casa_por_posicao(pos_final.get('longitude', 0), data_teste)
+                    
                     retrogradacoes.append({
                         'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
                         'data_fim': data_teste.strftime('%Y-%m-%d'),
-                        'duracao_dias': (data_teste - inicio_retro).days
+                        'duracao_dias': (data_teste - inicio_retro).days,
+                        'signo_destino': pos_final.get('signo', 'N/A'),
+                        'casa_destino': casa_final
                     })
                     em_retrogradacao = False
                     
@@ -293,6 +316,12 @@ class TransitoAstrologicoPreciso:
         except Exception as e:
             logger.error(f"Erro ao detectar retrogradação: {e}")
             return []
+    
+    def calcular_casa_por_posicao(self, longitude: float, data: datetime) -> int:
+        """Calcula casa baseada na longitude eclíptica"""
+        # Implementação simplificada - ajustar conforme sistema de casas usado
+        casa = int((longitude / 30) + 1)
+        return casa if casa <= 12 else casa - 12
     
     def calcular_aspectos_precisos(self, planeta_transito: Dict, natais: List[Dict]) -> List[Dict]:
         """Calcula aspectos com orbes astronômicos corretos"""
@@ -333,8 +362,113 @@ class TransitoAstrologicoPreciso:
             logger.error(f"Erro ao calcular aspectos precisos: {e}")
             return []
     
+    def calcular_duracao_aspectos(self, planeta_transito: Dict, natais: List[Dict]) -> List[Dict]:
+        """Calcula duração temporal dos aspectos"""
+        try:
+            aspectos_com_duracao = []
+            hoje = datetime.now()
+            nome_planeta = planeta_transito.get('name', 'Desconhecido')
+            
+            for natal in natais:
+                if not isinstance(natal, dict) or 'name' not in natal:
+                    continue
+                
+                grau_natal = float(natal.get('fullDegree', 0))
+                
+                # Para cada tipo de aspecto
+                for angulo, nome_aspecto, orbe_max in self.aspectos:
+                    
+                    # Buscar quando aspecto entra em orbe
+                    data_inicio = None
+                    data_fim = None
+                    
+                    for dias in range(-30, 60):  # 30 dias antes até 60 dias depois
+                        data_teste = hoje + timedelta(days=dias)
+                        
+                        pos = self.calcular_posicao_planeta_swisseph(nome_planeta, data_teste)
+                        if not pos:
+                            pos = self.calcular_posicao_planeta_ephem(nome_planeta, data_teste)
+                        
+                        if pos:
+                            grau_transito = pos.get('longitude', 0)
+                            diferenca = abs(grau_transito - grau_natal)
+                            diferenca = min(diferenca, 360 - diferenca)
+                            orbe_atual = abs(diferenca - angulo)
+                            
+                            if orbe_atual <= orbe_max:  # Dentro do orbe
+                                if data_inicio is None:
+                                    data_inicio = data_teste
+                                data_fim = data_teste
+                    
+                    if data_inicio and data_fim and (data_fim - data_inicio).days > 0:
+                        aspectos_com_duracao.append({
+                            'tipo_aspecto': nome_aspecto,
+                            'planeta_natal': natal.get('name'),
+                            'casa_natal': int(natal.get('house', 1)),
+                            'data_inicio': data_inicio.strftime('%Y-%m-%d'),
+                            'data_fim': data_fim.strftime('%Y-%m-%d'),
+                            'duracao_dias': (data_fim - data_inicio).days,
+                            'orbe_maximo': orbe_max
+                        })
+            
+            return sorted(aspectos_com_duracao, key=lambda x: x['duracao_dias'], reverse=True)
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular duração dos aspectos: {e}")
+            return []
+    
+    def calcular_movimento_casas(self, planeta: str, data_inicio: datetime, periodo_dias: int) -> List[Dict]:
+        """Calcula quando planeta muda de casa durante o trânsito"""
+        try:
+            movimento_casas = []
+            casa_atual = None
+            entrada_casa = None
+            
+            for dia in range(0, periodo_dias, 7):  # Verificar semanalmente
+                data_teste = data_inicio + timedelta(days=dia)
+                
+                pos = self.calcular_posicao_planeta_swisseph(planeta, data_teste)
+                if not pos:
+                    pos = self.calcular_posicao_planeta_ephem(planeta, data_teste)
+                
+                if not pos:
+                    continue
+                
+                casa_teste = self.calcular_casa_por_posicao(pos.get('longitude', 0), data_teste)
+                
+                if casa_atual is None:
+                    casa_atual = casa_teste
+                    entrada_casa = data_teste
+                
+                elif casa_teste != casa_atual:
+                    # Mudança de casa detectada
+                    movimento_casas.append({
+                        'casa': casa_atual,
+                        'data_entrada': entrada_casa.strftime('%Y-%m-%d'),
+                        'data_saida': data_teste.strftime('%Y-%m-%d'),
+                        'duracao_dias': (data_teste - entrada_casa).days
+                    })
+                    
+                    casa_atual = casa_teste
+                    entrada_casa = data_teste
+            
+            # Adicionar última casa
+            if casa_atual and entrada_casa:
+                movimento_casas.append({
+                    'casa': casa_atual,
+                    'data_entrada': entrada_casa.strftime('%Y-%m-%d'),
+                    'data_saida': (data_inicio + timedelta(days=periodo_dias)).strftime('%Y-%m-%d'),
+                    'duracao_dias': periodo_dias - (entrada_casa - data_inicio).days
+                })
+            
+            return movimento_casas
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular movimento entre casas: {e}")
+            return []
+    
     def processar_planeta_preciso(self, planeta: Dict, natais: List[Dict]) -> Dict:
-        """Processa planeta com cálculos astronômicos precisos"""
+        """Processa planeta com todas as otimizações implementadas"""
         try:
             nome = planeta.get('name', 'Desconhecido')
             signo = planeta.get('sign', 'Áries')
@@ -349,12 +483,29 @@ class TransitoAstrologicoPreciso:
                 'data_saida_signo': self.calcular_saida_signo_precisa(nome, signo)
             }
             
-            # Retrogradações (apenas se houver)
+            # Retrogradações detalhadas (apenas se houver)
             retrogradacoes = self.detectar_retrogradacao_precisa(nome)
             if retrogradacoes:
                 resultado['retrogradacoes'] = retrogradacoes
             
-            # Aspectos principais
+            # Movimento entre casas
+            try:
+                data_inicio = datetime.strptime(resultado['data_entrada_signo'], '%Y-%m-%d')
+                data_fim = datetime.strptime(resultado['data_saida_signo'], '%Y-%m-%d')
+                periodo_dias = (data_fim - data_inicio).days
+                
+                movimento_casas = self.calcular_movimento_casas(nome, data_inicio, min(periodo_dias, 365))
+                if len(movimento_casas) > 1:
+                    resultado['movimento_casas'] = movimento_casas
+            except Exception as e:
+                logger.warning(f"Erro ao calcular movimento de casas para {nome}: {e}")
+            
+            # Aspectos com duração
+            aspectos_duracao = self.calcular_duracao_aspectos(planeta, natais)
+            if aspectos_duracao:
+                resultado['aspectos_com_duracao'] = aspectos_duracao[:5]  # Máximo 5 aspectos
+            
+            # Aspectos principais (compatibilidade)
             aspectos = self.calcular_aspectos_precisos(planeta, natais)
             if aspectos:
                 resultado['aspectos_principais'] = aspectos[:5]  # Máximo 5 aspectos
