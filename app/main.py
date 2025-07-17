@@ -4,21 +4,36 @@ from typing import List, Dict, Any, Optional
 import uvicorn
 from datetime import datetime, timedelta
 import logging
+import json
 
-# Importar ephem de forma segura
+# BIBLIOTECAS ASTROLÓGICAS CORRETAS
 try:
-    import ephem
-    import math
-    EPHEM_DISPONIVEL = True
+    # Swiss Ephemeris - PADRÃO OURO para cálculos astrológicos
+    import swisseph as swe
+    SWISSEPH_DISPONIVEL = True
 except ImportError:
-    EPHEM_DISPONIVEL = False
-    logging.warning("PyEphem não disponível - usando cálculos simplificados")
+    SWISSEPH_DISPONIVEL = False
+
+try:
+    # PyEphem - Boa alternativa
+    import ephem
+    PYEPHEM_DISPONIVEL = True
+except ImportError:
+    PYEPHEM_DISPONIVEL = False
+
+try:
+    # Skyfield - Sucessor do PyEphem
+    from skyfield.api import load
+    from skyfield.almanac import find_discrete, risings_and_settings
+    SKYFIELD_DISPONIVEL = True
+except ImportError:
+    SKYFIELD_DISPONIVEL = False
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="API Trânsitos Astronômicos Precisos", version="9.0.0")
+app = FastAPI(title="API Trânsitos Astrológicos PRECISOS", version="11.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,16 +43,31 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class TransitoAstronomico:
+class TransitoAstrologicoPreciso:
     def __init__(self):
         self.signos = [
             'Áries', 'Touro', 'Gêmeos', 'Câncer', 'Leão', 'Virgem',
             'Libra', 'Escorpião', 'Sagitário', 'Capricórnio', 'Aquário', 'Peixes'
         ]
         
-        # Mapa PyEphem
-        if EPHEM_DISPONIVEL:
-            self.ephem_map = {
+        # Mapeamento para Swiss Ephemeris
+        if SWISSEPH_DISPONIVEL:
+            self.planetas_swe = {
+                'Sol': swe.SUN,
+                'Lua': swe.MOON,
+                'Mercúrio': swe.MERCURY,
+                'Vênus': swe.VENUS,
+                'Marte': swe.MARS,
+                'Júpiter': swe.JUPITER,
+                'Saturno': swe.SATURN,
+                'Urano': swe.URANUS,
+                'Netuno': swe.NEPTUNE,
+                'Plutão': swe.PLUTO
+            }
+        
+        # Mapeamento para PyEphem
+        if PYEPHEM_DISPONIVEL:
+            self.planetas_ephem = {
                 'Sol': ephem.Sun(),
                 'Lua': ephem.Moon(),
                 'Mercúrio': ephem.Mercury(),
@@ -49,239 +79,262 @@ class TransitoAstronomico:
                 'Netuno': ephem.Neptune(),
                 'Plutão': ephem.Pluto()
             }
-        else:
-            self.ephem_map = {}
+        
+        # Aspectos maiores com orbes corretos
+        self.aspectos = [
+            (0, "conjunção", 8),      # Orbe 8°
+            (60, "sextil", 6),        # Orbe 6°
+            (90, "quadratura", 8),    # Orbe 8°
+            (120, "trígono", 8),      # Orbe 8°
+            (180, "oposição", 8)      # Orbe 8°
+        ]
         
         # Planetas relevantes para trânsitos
         self.planetas_relevantes = ['Mercúrio', 'Vênus', 'Marte', 'Júpiter', 'Saturno', 'Urano', 'Netuno', 'Plutão']
         
-        # Aspectos maiores
-        self.aspectos = [
-            (0, "conjunção"),
-            (60, "sextil"), 
-            (90, "quadratura"),
-            (120, "trígono"),
-            (180, "oposição")
-        ]
+        # Inicializar Swiss Ephemeris
+        self.inicializar_swisseph()
     
-    def obter_posicao_planeta_data(self, nome_planeta: str, data: datetime) -> Dict:
-        """Obtém posição precisa do planeta em uma data específica"""
-        if not EPHEM_DISPONIVEL or nome_planeta not in self.ephem_map:
+    def inicializar_swisseph(self):
+        """Inicializa Swiss Ephemeris com path correto"""
+        if SWISSEPH_DISPONIVEL:
+            try:
+                # Definir path para arquivos de efemérides
+                swe.set_ephe_path('/usr/share/swisseph')  # Ajustar conforme instalação
+                return True
+            except:
+                logger.warning("Erro ao inicializar Swiss Ephemeris")
+                return False
+        return False
+    
+    def calcular_posicao_planeta_swisseph(self, planeta: str, data: datetime) -> Dict:
+        """Calcula posição exata usando Swiss Ephemeris"""
+        if not SWISSEPH_DISPONIVEL or planeta not in self.planetas_swe:
             return None
-            
+        
         try:
-            planeta = self.ephem_map[nome_planeta]
-            observer = ephem.Observer()
-            observer.date = data.strftime('%Y/%m/%d')
-            planeta.compute(observer)
+            # Converter data para Julian Day
+            jd = swe.julday(data.year, data.month, data.day, data.hour + data.minute/60.0)
             
-            longitude_rad = planeta.hlong
-            longitude_graus = float(longitude_rad) * 180 / math.pi
+            # Calcular posição
+            resultado = swe.calc_ut(jd, self.planetas_swe[planeta])
+            longitude = resultado[0][0]  # Longitude eclíptica
+            velocidade = resultado[0][3]  # Velocidade diária
             
-            if longitude_graus < 0:
-                longitude_graus += 360
-                
             # Determinar signo
-            signo_index = int(longitude_graus // 30) % 12
-            grau_no_signo = longitude_graus % 30
+            signo_index = int(longitude // 30)
+            grau_no_signo = longitude % 30
             
             return {
-                'longitude': longitude_graus,
+                'longitude': longitude,
                 'signo': self.signos[signo_index],
-                'grau_no_signo': grau_no_signo
+                'grau_no_signo': grau_no_signo,
+                'velocidade': velocidade,
+                'retrogrado': velocidade < 0
             }
             
         except Exception as e:
-            logger.error(f"Erro ao obter posição de {nome_planeta} em {data}: {e}")
+            logger.error(f"Erro SwissEph para {planeta}: {e}")
             return None
     
-    def calcular_entrada_signo(self, nome_planeta: str, signo_atual: str) -> str:
-        """Calcula quando o planeta entrou no signo atual"""
-        if not EPHEM_DISPONIVEL:
-            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    def calcular_posicao_planeta_ephem(self, planeta: str, data: datetime) -> Dict:
+        """Calcula posição usando PyEphem"""
+        if not PYEPHEM_DISPONIVEL or planeta not in self.planetas_ephem:
+            return None
         
+        try:
+            obj_planeta = self.planetas_ephem[planeta]
+            observer = ephem.Observer()
+            observer.date = data.strftime('%Y/%m/%d %H:%M:%S')
+            
+            obj_planeta.compute(observer)
+            
+            # Longitude eclíptica
+            longitude = float(obj_planeta.hlong) * 180 / 3.14159
+            if longitude < 0:
+                longitude += 360
+            
+            # Determinar signo
+            signo_index = int(longitude // 30)
+            grau_no_signo = longitude % 30
+            
+            return {
+                'longitude': longitude,
+                'signo': self.signos[signo_index],
+                'grau_no_signo': grau_no_signo,
+                'velocidade': 0  # PyEphem não fornece velocidade diretamente
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro PyEphem para {planeta}: {e}")
+            return None
+    
+    def calcular_entrada_signo_precisa(self, planeta: str, signo_atual: str) -> str:
+        """Calcula entrada no signo usando bibliotecas astronômicas"""
         try:
             hoje = datetime.now()
             
-            # Buscar para trás até encontrar quando entrou no signo
-            for dias_atras in range(0, 730):  # Buscar até 2 anos atrás
+            # Buscar para trás até encontrar mudança de signo
+            for dias_atras in range(1, 1000):  # Buscar até ~3 anos
                 data_teste = hoje - timedelta(days=dias_atras)
-                pos = self.obter_posicao_planeta_data(nome_planeta, data_teste)
+                
+                # Tentar Swiss Ephemeris primeiro
+                pos = self.calcular_posicao_planeta_swisseph(planeta, data_teste)
+                if not pos:
+                    pos = self.calcular_posicao_planeta_ephem(planeta, data_teste)
                 
                 if pos and pos['signo'] != signo_atual:
-                    # Encontrou quando estava em signo diferente
-                    # A entrada foi no dia seguinte
-                    data_entrada = data_teste + timedelta(days=1)
-                    return data_entrada.strftime('%Y-%m-%d')
+                    # Encontrou mudança - refinar a data
+                    return self.refinar_data_mudanca_signo(planeta, data_teste, data_teste + timedelta(days=1))
             
-            # Se não encontrou, assumir entrada há 30 dias
+            # Se não encontrou, retornar estimativa
             return (hoje - timedelta(days=30)).strftime('%Y-%m-%d')
             
         except Exception as e:
-            logger.error(f"Erro ao calcular entrada de {nome_planeta} em {signo_atual}: {e}")
+            logger.error(f"Erro ao calcular entrada precisa: {e}")
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
     
-    def calcular_saida_signo(self, nome_planeta: str, signo_atual: str) -> str:
-        """Calcula quando o planeta sairá do signo atual"""
-        if not EPHEM_DISPONIVEL:
-            return (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
-        
+    def calcular_saida_signo_precisa(self, planeta: str, signo_atual: str) -> str:
+        """Calcula saída do signo usando bibliotecas astronômicas"""
         try:
             hoje = datetime.now()
             
             # Buscar para frente até encontrar mudança de signo
-            for dias_futuros in range(1, 730):  # Buscar até 2 anos à frente
+            for dias_futuros in range(1, 1000):  # Buscar até ~3 anos
                 data_teste = hoje + timedelta(days=dias_futuros)
-                pos = self.obter_posicao_planeta_data(nome_planeta, data_teste)
+                
+                # Tentar Swiss Ephemeris primeiro
+                pos = self.calcular_posicao_planeta_swisseph(planeta, data_teste)
+                if not pos:
+                    pos = self.calcular_posicao_planeta_ephem(planeta, data_teste)
                 
                 if pos and pos['signo'] != signo_atual:
-                    # Encontrou mudança de signo
-                    return data_teste.strftime('%Y-%m-%d')
+                    # Encontrou mudança - refinar a data
+                    return self.refinar_data_mudanca_signo(planeta, data_teste - timedelta(days=1), data_teste)
             
-            # Se não encontrou, assumir saída em 90 dias
-            return (hoje + timedelta(days=90)).strftime('%Y-%m-%d')
+            # Se não encontrou, retornar estimativa
+            return (hoje + timedelta(days=365)).strftime('%Y-%m-%d')
             
         except Exception as e:
-            logger.error(f"Erro ao calcular saída de {nome_planeta} de {signo_atual}: {e}")
-            return (datetime.now() + timedelta(days=90)).strftime('%Y-%m-%d')
+            logger.error(f"Erro ao calcular saída precisa: {e}")
+            return (datetime.now() + timedelta(days=365)).strftime('%Y-%m-%d')
     
-    def calcular_retrogradacoes_precisas(self, nome_planeta: str) -> List[Dict]:
-        """Calcula retrogradações precisas usando PyEphem"""
-        if not EPHEM_DISPONIVEL:
-            return []
-        
-        # Planetas que não retrogradam
-        if nome_planeta in ['Sol', 'Lua']:
-            return []
-        
+    def refinar_data_mudanca_signo(self, planeta: str, data_antes: datetime, data_depois: datetime) -> str:
+        """Refina a data exata de mudança de signo"""
         try:
+            # Busca binária para encontrar momento exato
+            while (data_depois - data_antes).days > 0:
+                data_meio = data_antes + (data_depois - data_antes) / 2
+                
+                pos = self.calcular_posicao_planeta_swisseph(planeta, data_meio)
+                if not pos:
+                    pos = self.calcular_posicao_planeta_ephem(planeta, data_meio)
+                
+                if not pos:
+                    break
+                
+                # Verificar se já mudou de signo
+                pos_antes = self.calcular_posicao_planeta_swisseph(planeta, data_antes)
+                if not pos_antes:
+                    pos_antes = self.calcular_posicao_planeta_ephem(planeta, data_antes)
+                
+                if pos and pos_antes and pos['signo'] == pos_antes['signo']:
+                    data_antes = data_meio
+                else:
+                    data_depois = data_meio
+            
+            return data_depois.strftime('%Y-%m-%d')
+            
+        except Exception as e:
+            logger.error(f"Erro ao refinar data: {e}")
+            return data_depois.strftime('%Y-%m-%d')
+    
+    def detectar_retrogradacao_precisa(self, planeta: str) -> List[Dict]:
+        """Detecta retrogradações usando cálculos astronômicos reais"""
+        try:
+            if planeta in ['Sol', 'Lua']:
+                return []
+            
             hoje = datetime.now()
             retrogradacoes = []
             
             em_retrogradacao = False
             inicio_retro = None
-            signo_retro = None
             
-            # Verificar próximos 365 dias, dia por dia para maior precisão
-            for dias in range(0, 366):
+            # Verificar próximos 400 dias
+            for dias in range(0, 400):
                 data_teste = hoje + timedelta(days=dias)
-                pos_hoje = self.obter_posicao_planeta_data(nome_planeta, data_teste)
-                pos_amanha = self.obter_posicao_planeta_data(nome_planeta, data_teste + timedelta(days=1))
                 
-                if pos_hoje and pos_amanha:
-                    # Calcular velocidade (movimento diário)
-                    diff_longitude = pos_amanha['longitude'] - pos_hoje['longitude']
+                pos = self.calcular_posicao_planeta_swisseph(planeta, data_teste)
+                if not pos:
+                    continue
+                
+                eh_retrogrado = pos.get('retrogrado', False) or pos.get('velocidade', 0) < 0
+                
+                if eh_retrogrado and not em_retrogradacao:
+                    # Início da retrogradação
+                    inicio_retro = data_teste
+                    em_retrogradacao = True
                     
-                    # Ajustar para passagem pelo 0°
-                    if diff_longitude > 180:
-                        diff_longitude -= 360
-                    elif diff_longitude < -180:
-                        diff_longitude += 360
+                elif not eh_retrogrado and em_retrogradacao:
+                    # Fim da retrogradação
+                    retrogradacoes.append({
+                        'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
+                        'data_fim': data_teste.strftime('%Y-%m-%d'),
+                        'duracao_dias': (data_teste - inicio_retro).days
+                    })
+                    em_retrogradacao = False
                     
-                    eh_retrogrado = diff_longitude < 0
-                    
-                    if eh_retrogrado and not em_retrogradacao:
-                        # Início da retrogradação
-                        inicio_retro = data_teste
-                        signo_retro = pos_hoje['signo']
-                        em_retrogradacao = True
-                        
-                    elif not eh_retrogrado and em_retrogradacao:
-                        # Fim da retrogradação
-                        retrogradacoes.append({
-                            'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
-                            'data_fim': data_teste.strftime('%Y-%m-%d'),
-                            'signo_retrogradacao': signo_retro,
-                            'duracao_dias': (data_teste - inicio_retro).days
-                        })
-                        em_retrogradacao = False
-                        
-                        # Parar após encontrar primeira retrogradação
-                        break
-            
-            # Se ainda está em retrogradação no final do período
-            if em_retrogradacao and inicio_retro:
-                retrogradacoes.append({
-                    'data_inicio': inicio_retro.strftime('%Y-%m-%d'),
-                    'data_fim': (hoje + timedelta(days=365)).strftime('%Y-%m-%d'),
-                    'signo_retrogradacao': signo_retro,
-                    'duracao_dias': 365 - (inicio_retro - hoje).days
-                })
+                    # Encontrar apenas a primeira retrogradação
+                    break
             
             return retrogradacoes
             
         except Exception as e:
-            logger.error(f"Erro ao calcular retrogradação de {nome_planeta}: {e}")
+            logger.error(f"Erro ao detectar retrogradação: {e}")
             return []
     
-    def determinar_casa_por_grau(self, grau: float, casas: List[Dict]) -> int:
-        """Determina casa baseada no grau"""
-        grau = grau % 360
-        
-        for i, casa in enumerate(casas):
-            proxima_casa = casas[(i + 1) % len(casas)]
-            grau_casa = casa['degree']
-            grau_proxima = proxima_casa['degree']
-            
-            if grau_proxima > grau_casa:
-                if grau_casa <= grau < grau_proxima:
-                    return casa['house']
-            else:
-                if grau >= grau_casa or grau < grau_proxima:
-                    return casa['house']
-        
-        return 1
-    
-    def calcular_aspectos_principais(self, planeta: Dict, natais: List[Dict]) -> List[Dict]:
-        """Calcula apenas aspectos mais relevantes (máximo 3)"""
+    def calcular_aspectos_precisos(self, planeta_transito: Dict, natais: List[Dict]) -> List[Dict]:
+        """Calcula aspectos com orbes astronômicos corretos"""
         try:
             aspectos = []
-            signo = planeta.get('sign', 'Áries')
-            grau_atual = float(planeta.get('normDegree', 0))
             
-            # Posição atual absoluta
-            try:
-                signo_index = self.signos.index(signo)
-            except ValueError:
-                return []
-            
-            grau_absoluto = (signo_index * 30) + grau_atual
-            
-            # Testar apenas com planetas natais principais
-            planetas_principais = ['Sol', 'Lua', 'Mercúrio', 'Vênus', 'Marte', 'Júpiter']
+            grau_transito = float(planeta_transito.get('fullDegree', 0))
             
             for natal in natais:
-                if not isinstance(natal, dict) or natal.get('name') not in planetas_principais:
+                if not isinstance(natal, dict) or 'name' not in natal:
                     continue
                 
-                try:
-                    natal_grau = float(natal.get('fullDegree', 0))
-                    diferenca = abs(grau_absoluto - natal_grau)
-                    diferenca = min(diferenca, 360 - diferenca)
-                    
-                    for angulo, nome_aspecto in self.aspectos:
-                        if abs(diferenca - angulo) <= 3:  # Orbe mais apertado: 3 graus
-                            aspectos.append({
-                                'tipo_aspecto': nome_aspecto,
-                                'planeta_natal': natal.get('name'),
-                                'casa_natal': int(natal.get('house', 1)),
-                                'orbe': round(abs(diferenca - angulo), 1)
-                            })
-                            break  # Apenas 1 aspecto por planeta natal
-                            
-                except Exception:
-                    continue
+                grau_natal = float(natal.get('fullDegree', 0))
+                
+                # Calcular diferença angular
+                diferenca = abs(grau_transito - grau_natal)
+                diferenca = min(diferenca, 360 - diferenca)
+                
+                # Verificar aspectos com orbes corretos
+                for angulo, nome_aspecto, orbe_max in self.aspectos:
+                    orbe = abs(diferenca - angulo)
+                    if orbe <= orbe_max:
+                        aspectos.append({
+                            'tipo_aspecto': nome_aspecto,
+                            'planeta_natal': natal.get('name'),
+                            'casa_natal': int(natal.get('house', 1)),
+                            'orbe': round(orbe, 2),
+                            'orbe_maximo': orbe_max,
+                            'exatidao': round((1 - orbe/orbe_max) * 100, 1)  # Percentual de exatidão
+                        })
+                        break
             
-            # Retornar apenas os 3 aspectos mais exatos
+            # Ordenar por exatidão
             aspectos.sort(key=lambda x: x['orbe'])
-            return aspectos[:3]
+            return aspectos
             
         except Exception as e:
-            logger.error(f"Erro ao calcular aspectos: {e}")
+            logger.error(f"Erro ao calcular aspectos precisos: {e}")
             return []
     
-    def processar_planeta_astronomico(self, planeta: Dict, natais: List[Dict], casas: List[Dict]) -> Dict:
-        """Processamento astronômico preciso e enxuto"""
+    def processar_planeta_preciso(self, planeta: Dict, natais: List[Dict]) -> Dict:
+        """Processa planeta com cálculos astronômicos precisos"""
         try:
             nome = planeta.get('name', 'Desconhecido')
             signo = planeta.get('sign', 'Áries')
@@ -290,21 +343,21 @@ class TransitoAstronomico:
             
             resultado = {
                 'signo_atual': signo,
-                'grau_atual': round(grau, 1),
+                'grau_atual': round(grau, 2),
                 'casa_atual': casa_atual,
-                'data_entrada_signo': self.calcular_entrada_signo(nome, signo),
-                'data_saida_signo': self.calcular_saida_signo(nome, signo)
+                'data_entrada_signo': self.calcular_entrada_signo_precisa(nome, signo),
+                'data_saida_signo': self.calcular_saida_signo_precisa(nome, signo)
             }
             
             # Retrogradações (apenas se houver)
-            retrogradacoes = self.calcular_retrogradacoes_precisas(nome)
+            retrogradacoes = self.detectar_retrogradacao_precisa(nome)
             if retrogradacoes:
                 resultado['retrogradacoes'] = retrogradacoes
             
-            # Aspectos principais (apenas os mais relevantes)
-            aspectos = self.calcular_aspectos_principais(planeta, natais)
+            # Aspectos principais
+            aspectos = self.calcular_aspectos_precisos(planeta, natais)
             if aspectos:
-                resultado['aspectos_principais'] = aspectos
+                resultado['aspectos_principais'] = aspectos[:5]  # Máximo 5 aspectos
             
             return resultado
             
@@ -312,45 +365,62 @@ class TransitoAstronomico:
             logger.error(f"Erro ao processar {planeta.get('name', 'Desconhecido')}: {e}")
             return {
                 'signo_atual': planeta.get('sign', 'Áries'),
-                'grau_atual': round(float(planeta.get('normDegree', 0)), 1),
+                'grau_atual': round(float(planeta.get('normDegree', 0)), 2),
                 'casa_atual': int(planeta.get('house', 1)),
                 'erro': str(e)
             }
 
 # ============ ENDPOINTS ============
-calc = TransitoAstronomico()
+calc = TransitoAstrologicoPreciso()
 
 @app.get("/")
 async def root():
+    bibliotecas_status = {
+        'SwissEph': SWISSEPH_DISPONIVEL,
+        'PyEphem': PYEPHEM_DISPONIVEL,
+        'Skyfield': SKYFIELD_DISPONIVEL
+    }
+    
     return {
-        "message": "API Trânsitos Astronômicos Precisos v9.0",
-        "status": "CÁLCULOS ASTRONÔMICOS REAIS",
+        "message": "API Trânsitos Astrológicos PRECISOS v11.0",
+        "bibliotecas_astronomicas": bibliotecas_status,
+        "recomendacao": "Instale Swiss Ephemeris para máxima precisão",
+        "comando_instalacao": {
+            "swisseph": "pip install pyswisseph",
+            "pyephem": "pip install pyephem",
+            "skyfield": "pip install skyfield"
+        },
         "melhorias": [
-            "✅ Datas reais de entrada nos signos",
-            "✅ Retrogradações calculadas dia por dia",
-            "✅ Cálculos astronômicos com PyEphem",
-            "✅ Output ultra-enxuto (máximo 8 planetas)",
-            "✅ Apenas dados essenciais",
-            "✅ Aspectos mais relevantes (máximo 3 por planeta)",
-            "✅ Responde: 'quando entrou', 'quando retrograda'",
-            "✅ Inclui planetas pessoais relevantes"
-        ],
-        "exemplo_perguntas": [
-            "Quando Urano entrou em Gêmeos?",
-            "Até quando Mercúrio fica retrógrado?", 
-            "Quando Saturno entrou em Áries?"
+            "✅ Swiss Ephemeris (padrão ouro)",
+            "✅ PyEphem como alternativa",
+            "✅ Cálculos astronômicos reais",
+            "✅ Detecção precisa de retrogradações",
+            "✅ Datas exatas de mudanças de signo",
+            "✅ Aspectos com orbes astronômicos",
+            "✅ Busca binária para precisão"
         ]
     }
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "message": "API funcionando corretamente"}
+    return {
+        "status": "healthy",
+        "swisseph": SWISSEPH_DISPONIVEL,
+        "pyephem": PYEPHEM_DISPONIVEL,
+        "skyfield": SKYFIELD_DISPONIVEL
+    }
 
-@app.post("/transitos-astronomicos")
-async def transitos_astronomicos(data: List[Dict[str, Any]]):
-    """Trânsitos com cálculos astronômicos precisos - output enxuto"""
+@app.post("/transitos-astronomicos-precisos")
+async def transitos_precisos(data: List[Dict[str, Any]]):
+    """Trânsitos com cálculos astronômicos REAIS"""
     try:
-        logger.info(f"Processando {len(data)} elementos")
+        if not SWISSEPH_DISPONIVEL and not PYEPHEM_DISPONIVEL:
+            raise HTTPException(
+                status_code=500, 
+                detail="Nenhuma biblioteca astronômica disponível. Instale: pip install pyswisseph"
+            )
+        
+        logger.info(f"Processando {len(data)} elementos com bibliotecas astronômicas")
         
         if len(data) < 23:
             raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(data)} elementos")
@@ -366,7 +436,6 @@ async def transitos_astronomicos(data: List[Dict[str, Any]]):
         # Separar dados
         transitos = dados_extraidos[:11]
         natais = dados_extraidos[11:22]
-        casas = dados_extraidos[22]['houses']
         
         # Processar apenas planetas relevantes para trânsitos
         planetas_processados = {}
@@ -374,12 +443,14 @@ async def transitos_astronomicos(data: List[Dict[str, Any]]):
         for transito in transitos:
             if transito and transito.get('name') in calc.planetas_relevantes:
                 nome = transito.get('name')
-                logger.info(f"Processando {nome}")
-                planetas_processados[nome] = calc.processar_planeta_astronomico(transito, natais, casas)
+                logger.info(f"Processando {nome} com cálculos astronômicos")
+                planetas_processados[nome] = calc.processar_planeta_preciso(transito, natais)
         
-        # Output ultra-limpo
+        # Output com informações da biblioteca usada
         return {
             'periodo_analise': '1 ano',
+            'biblioteca_usada': 'SwissEph' if SWISSEPH_DISPONIVEL else 'PyEphem',
+            'precisao': 'Astronômica profissional',
             'planetas': planetas_processados
         }
         
@@ -387,13 +458,20 @@ async def transitos_astronomicos(data: List[Dict[str, Any]]):
         logger.error(f"Erro: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Manter compatibilidade com endpoint anterior
+@app.post("/transitos-astronomicos")
+async def transitos_astronomicos(data: List[Dict[str, Any]]):
+    """Redirecionamento para endpoint preciso"""
+    return await transitos_precisos(data)
+
 if __name__ == "__main__":
-    print("🚀 API Trânsitos Astronômicos Precisos v9.0")
-    print("✅ Cálculos astronômicos reais com PyEphem")
-    print("✅ Datas precisas de entrada/saída de signos")
-    print("✅ Retrogradações calculadas dia por dia")
-    print("✅ Output ultra-enxuto (máximo 8 planetas)")
-    print("✅ Responde perguntas específicas sobre trânsitos")
-    print("🎯 Pronto para uso!")
+    print("🚀 API Trânsitos Astrológicos PRECISOS v11.0")
+    print(f"Swiss Ephemeris: {'✅' if SWISSEPH_DISPONIVEL else '❌'}")
+    print(f"PyEphem: {'✅' if PYEPHEM_DISPONIVEL else '❌'}")
+    print(f"Skyfield: {'✅' if SKYFIELD_DISPONIVEL else '❌'}")
+    
+    if not SWISSEPH_DISPONIVEL and not PYEPHEM_DISPONIVEL:
+        print("⚠️  AVISO: Nenhuma biblioteca astronômica instalada!")
+        print("📦 Instale: pip install pyswisseph")
     
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

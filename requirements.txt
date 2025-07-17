@@ -2,8 +2,9 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 python-multipart==0.0.6
-skyfield
-pyephem
+pyswisseph==2.10.3.2
+pyephem==4.1.5
+skyfield==1.46
 numpy
 python-dateutil
 requests 
