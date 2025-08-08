@@ -1755,13 +1755,17 @@ async def calcular_transitos_simples(data: Any):
             )
         
         logger.info("🚀 Calculando trânsitos simples para data específica")
+        logger.info(f"Dados recebidos: {data}")
         
         # Normalizar dados (aceitar array ou objeto)
         if isinstance(data, list) and len(data) > 0:
             dados = data[0]  # Pegar primeiro elemento do array
+            logger.info(f"Dados normalizados (array): {dados}")
         elif isinstance(data, dict):
             dados = data
+            logger.info(f"Dados normalizados (objeto): {dados}")
         else:
+            logger.error(f"Formato inválido: {type(data)} - {data}")
             raise HTTPException(
                 status_code=400,
                 detail="Formato inválido. Envie um objeto ou array com um objeto"
@@ -1769,12 +1773,19 @@ async def calcular_transitos_simples(data: Any):
         
         # Validar dados obrigatórios
         campos_obrigatorios = ['day', 'month', 'year', 'hour', 'min', 'tzone', 'lon', 'lat']
+        campos_faltando = []
+        
         for campo in campos_obrigatorios:
             if campo not in dados:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Campo obrigatório ausente: {campo}"
-                )
+                campos_faltando.append(campo)
+        
+        if campos_faltando:
+            logger.error(f"Campos obrigatórios faltando: {campos_faltando}")
+            logger.error(f"Dados recebidos: {dados}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Campos obrigatórios ausentes: {', '.join(campos_faltando)}"
+            )
         
         # Converter dados para datetime
         data_transito = datetime(
