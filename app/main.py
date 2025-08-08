@@ -1738,16 +1738,13 @@ async def transitos_especificos(data: List[Dict[str, Any]]):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/calcular-transitos-simples")
-async def calcular_transitos_simples(data: Dict[str, Any]):
+async def calcular_transitos_simples(data: Any):
     """
     ✅ ENDPOINT SIMPLES: Calcula apenas trânsitos para uma data específica
     
-    Input esperado:
-    {
-        "day": "7", "month": "8", "year": "2025",
-        "hour": "10", "min": "0", "tzone": "-3",
-        "lon": -43.2, "lat": -22.9
-    }
+    Aceita tanto array quanto objeto:
+    Array: [{"day": "7", "month": "8", "year": "2025", "hour": "10", "min": "0", "tzone": "-3", "lon": -43.2, "lat": -22.9}]
+    Objeto: {"day": "7", "month": "8", "year": "2025", "hour": "10", "min": "0", "tzone": "-3", "lon": -43.2, "lat": -22.9}
     """
     
     try:
@@ -1759,10 +1756,21 @@ async def calcular_transitos_simples(data: Dict[str, Any]):
         
         logger.info("🚀 Calculando trânsitos simples para data específica")
         
+        # Normalizar dados (aceitar array ou objeto)
+        if isinstance(data, list) and len(data) > 0:
+            dados = data[0]  # Pegar primeiro elemento do array
+        elif isinstance(data, dict):
+            dados = data
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Formato inválido. Envie um objeto ou array com um objeto"
+            )
+        
         # Validar dados obrigatórios
         campos_obrigatorios = ['day', 'month', 'year', 'hour', 'min', 'tzone', 'lon', 'lat']
         for campo in campos_obrigatorios:
-            if campo not in data:
+            if campo not in dados:
                 raise HTTPException(
                     status_code=400,
                     detail=f"Campo obrigatório ausente: {campo}"
@@ -1770,15 +1778,15 @@ async def calcular_transitos_simples(data: Dict[str, Any]):
         
         # Converter dados para datetime
         data_transito = datetime(
-            int(data['year']),
-            int(data['month']), 
-            int(data['day']),
-            int(data['hour']),
-            int(data['min'])
+            int(dados['year']),
+            int(dados['month']), 
+            int(dados['day']),
+            int(dados['hour']),
+            int(dados['min'])
         )
         
         # Ajustar timezone
-        tzone = float(data['tzone'])
+        tzone = float(dados['tzone'])
         data_utc = data_transito - timedelta(hours=tzone)
         
         # Converter para Julian Day
@@ -1788,8 +1796,8 @@ async def calcular_transitos_simples(data: Dict[str, Any]):
         )
         
         # Coordenadas geográficas
-        lon = float(data['lon'])
-        lat = float(data['lat'])
+        lon = float(dados['lon'])
+        lat = float(dados['lat'])
         
         # Calcular cúspides das casas (Placidus) para a data de trânsito
         cusps, ascmc = swe.houses(jd_ut, lat, lon, b'P')  # 'P' = Placidus
@@ -1860,11 +1868,11 @@ async def calcular_transitos_simples(data: Dict[str, Any]):
         
         return {
             "status": "sucesso",
-            "data_calculo": f"{data['day']}/{data['month']}/{data['year']} {data['hour']}:{data['min']}",
-            "timezone": data['tzone'],
+            "data_calculo": f"{dados['day']}/{dados['month']}/{dados['year']} {dados['hour']}:{dados['min']}",
+            "timezone": dados['tzone'],
             "coordenadas": {
-                "longitude": data['lon'],
-                "latitude": data['lat']
+                "longitude": dados['lon'],
+                "latitude": dados['lat']
             },
             "biblioteca_usada": "SwissEph",
             "precisao": "Astronômica profissional",
