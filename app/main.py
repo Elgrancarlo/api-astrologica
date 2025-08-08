@@ -1111,10 +1111,18 @@ class TransitoAstrologicoPreciso:
             # Organizar cúspides
             cuspides = []
             for i in range(12):
-                cuspides.append({
-                    'house': i + 1,
-                    'degree': cusps[i + 1]  # cusps[0] não é usado
-                })
+                # Verificar se o índice existe no array cusps
+                if i + 1 < len(cusps):
+                    cuspides.append({
+                        'house': i + 1,
+                        'degree': cusps[i + 1]  # cusps[0] não é usado
+                    })
+                else:
+                    # Fallback se não tiver o índice
+                    cuspides.append({
+                        'house': i + 1,
+                        'degree': 0.0
+                    })
             
             # Calcular posições dos planetas natais
             planetas_natais = {}
@@ -1806,22 +1814,7 @@ async def calcular_transitos_simples(data: Any = Body(...)):
             data_utc.hour + data_utc.minute/60.0
         )
         
-        # Coordenadas geográficas
-        lon = float(dados['lon'])
-        lat = float(dados['lat'])
-        
-        # Calcular cúspides das casas (Placidus) para a data de trânsito
-        cusps, ascmc = swe.houses(jd_ut, lat, lon, b'P')  # 'P' = Placidus
-        
-        # Organizar cúspides
-        cuspides = []
-        for i in range(12):
-            cuspides.append({
-                'house': i + 1,
-                'degree': cusps[i + 1]  # cusps[0] não é usado
-            })
-        
-        # Calcular posições dos planetas em trânsito
+        # Calcular posições dos planetas em trânsito (SIMPLES)
         planetas_transito = {}
         
         for nome_planeta, id_swe in calc.planetas_swe.items():
@@ -1839,39 +1832,19 @@ async def calcular_transitos_simples(data: Any = Body(...)):
                 longitude = resultado[0][0]
                 velocidade = resultado[0][3]
                 
-                # Determinar signo
+                # Determinar signo (SIMPLES)
                 signo_index = int(longitude // 30)
                 grau_no_signo = longitude % 30
-                
-                # ✅ DETERMINAR CASA CORRETAMENTE usando cúspides calculadas
-                casa = calc.determinar_casa_por_cuspides(longitude, cuspides)
                 
                 # Verificar se está retrógrado
                 retrogrado = velocidade < 0
                 
-                # Calcular períodos de entrada/saída do signo
-                entrada_signo = calc.calcular_entrada_signo_autonoma(
-                    nome_planeta, signo_index, data_transito
-                )
-                saida_signo = calc.calcular_saida_signo_autonoma(
-                    nome_planeta, signo_index, data_transito
-                )
-                
-                # Detectar retrogradações próximas
-                retrogradacoes = calc.detectar_retrogradacoes_autonomas(
-                    nome_planeta, data_transito
-                )
-                
                 planetas_transito[nome_planeta] = {
                     'signo_atual': calc.signos[signo_index],
                     'grau_atual': round(grau_no_signo, 2),
-                    'casa_atual': casa,  # ✅ SEMPRE CORRETO
                     'longitude_atual': round(longitude, 6),
                     'velocidade_diaria': round(velocidade, 6),
-                    'retrogrado': retrogrado,
-                    'data_entrada_signo': entrada_signo,
-                    'data_saida_signo': saida_signo,
-                    'retrogradacoes': retrogradacoes
+                    'retrogrado': retrogrado
                 }
                 
             except Exception as e:
@@ -1887,11 +1860,6 @@ async def calcular_transitos_simples(data: Any = Body(...)):
             },
             "biblioteca_usada": "SwissEph",
             "precisao": "Astronômica profissional",
-            "sistema_casas": "Placidus",
-            "problema_resolvido": "Casas calculadas corretamente (sem dependência de APIs externas)",
-            "cuspides_placidus": cuspides,
-            "ascendente": ascmc[0],
-            "meio_do_ceu": ascmc[1],
             "transitos": planetas_transito
         }
         
