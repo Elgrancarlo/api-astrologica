@@ -1568,6 +1568,7 @@ async def root():
         },
         "endpoints_principais": {
             "/calcular-transitos-completo": "✅ NOVO: Cálculo autônomo completo (resolve problema das casas)",
+            "/calcular-transitos-simples": "✅ NOVO: Apenas trânsitos para uma data (formato simples)",
             "/transitos-astronomicos-precisos": "Cálculos astronômicos reais",
             "/transitos-especificos": "Trânsitos formatados para LLM"
         },
@@ -1728,6 +1729,143 @@ async def transitos_especificos(data: List[Dict[str, Any]]):
         
     except Exception as e:
         logger.error(f"Erro geral no processamento de trânsitos específicos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/calcular-transitos-simples")
+async def calcular_transitos_simples(data: Dict[str, Any]):
+    """
+    ✅ ENDPOINT SIMPLES: Calcula apenas trânsitos para uma data específica
+    
+    Input esperado:
+    {
+        "day": "7", "month": "8", "year": "2025",
+        "hour": "10", "min": "0", "tzone": "-3",
+        "lon": -43.2, "lat": -22.9
+    }
+    """
+    
+    try:
+        if not SWISSEPH_DISPONIVEL:
+            raise HTTPException(
+                status_code=500, 
+                detail="Swiss Ephemeris não disponível. Instale: pip install pyswisseph"
+            )
+        
+        logger.info("🚀 Calculando trânsitos simples para data específica")
+        
+        # Validar dados obrigatórios
+        campos_obrigatorios = ['day', 'month', 'year', 'hour', 'min', 'tzone', 'lon', 'lat']
+        for campo in campos_obrigatorios:
+            if campo not in data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Campo obrigatório ausente: {campo}"
+                )
+        
+        # Converter dados para datetime
+        data_transito = datetime(
+            int(data['year']),
+            int(data['month']), 
+            int(data['day']),
+            int(data['hour']),
+            int(data['min'])
+        )
+        
+        # Ajustar timezone
+        tzone = float(data['tzone'])
+        data_utc = data_transito - timedelta(hours=tzone)
+        
+        # Converter para Julian Day
+        jd_ut = swe.julday(
+            data_utc.year, data_utc.month, data_utc.day,
+            data_utc.hour + data_utc.minute/60.0
+        )
+        
+        # Coordenadas geográficas
+        lon = float(data['lon'])
+        lat = float(data['lat'])
+        
+        # Calcular cúspides das casas (Placidus) para a data de trânsito
+        cusps, ascmc = swe.houses(jd_ut, lat, lon, b'P')  # 'P' = Placidus
+        
+        # Organizar cúspides
+        cuspides = []
+        for i in range(12):
+            cuspides.append({
+                'house': i + 1,
+                'degree': cusps[i + 1]  # cusps[0] não é usado
+            })
+        
+        # Calcular posições dos planetas em trânsito
+        planetas_transito = {}
+        
+        for nome_planeta, id_swe in calc.planetas_swe.items():
+            if nome_planeta not in calc.planetas_relevantes:
+                continue
+            
+            try:
+                resultado = swe.calc_ut(jd_ut, id_swe)
+                longitude = resultado[0][0]
+                velocidade = resultado[0][3]
+                
+                # Determinar signo
+                signo_index = int(longitude // 30)
+                grau_no_signo = longitude % 30
+                
+                # ✅ DETERMINAR CASA CORRETAMENTE usando cúspides calculadas
+                casa = calc.determinar_casa_por_cuspides(longitude, cuspides)
+                
+                # Verificar se está retrógrado
+                retrogrado = velocidade < 0
+                
+                # Calcular períodos de entrada/saída do signo
+                entrada_signo = calc.calcular_entrada_signo_autonoma(
+                    nome_planeta, signo_index, data_transito
+                )
+                saida_signo = calc.calcular_saida_signo_autonoma(
+                    nome_planeta, signo_index, data_transito
+                )
+                
+                # Detectar retrogradações próximas
+                retrogradacoes = calc.detectar_retrogradacoes_autonomas(
+                    nome_planeta, data_transito
+                )
+                
+                planetas_transito[nome_planeta] = {
+                    'signo_atual': calc.signos[signo_index],
+                    'grau_atual': round(grau_no_signo, 2),
+                    'casa_atual': casa,  # ✅ SEMPRE CORRETO
+                    'longitude_atual': round(longitude, 6),
+                    'velocidade_diaria': round(velocidade, 6),
+                    'retrogrado': retrogrado,
+                    'data_entrada_signo': entrada_signo,
+                    'data_saida_signo': saida_signo,
+                    'retrogradacoes': retrogradacoes
+                }
+                
+            except Exception as e:
+                logger.error(f"Erro ao calcular {nome_planeta} em trânsito: {e}")
+        
+        return {
+            "status": "sucesso",
+            "data_calculo": f"{data['day']}/{data['month']}/{data['year']} {data['hour']}:{data['min']}",
+            "timezone": data['tzone'],
+            "coordenadas": {
+                "longitude": data['lon'],
+                "latitude": data['lat']
+            },
+            "biblioteca_usada": "SwissEph",
+            "precisao": "Astronômica profissional",
+            "sistema_casas": "Placidus",
+            "problema_resolvido": "Casas calculadas corretamente (sem dependência de APIs externas)",
+            "cuspides_placidus": cuspides,
+            "ascendente": ascmc[0],
+            "meio_do_ceu": ascmc[1],
+            "transitos": planetas_transito
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no cálculo simples: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
