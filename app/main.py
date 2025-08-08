@@ -1634,39 +1634,92 @@ async def transitos_precisos(data: List[Dict[str, Any]]):
                 detail="Nenhuma biblioteca astronômica disponível. Instale: pip install pyswisseph"
             )
         
-        logger.info(f"Processando {len(data)} elementos com bibliotecas astronômicas")
+        logger.info(f"Processando dados com nova estrutura")
         
-        if len(data) < 23:
-            raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(data)} elementos")
-        
-        # Extrair dados da chave 'json' se necessário
+        # Extrair dados da nova estrutura
         dados_extraidos = []
-        for item in data:
-            if isinstance(item, dict) and 'json' in item:
-                dados_extraidos.append(item['json'])
-            else:
-                dados_extraidos.append(item)
         
-        # Separar dados
-        transitos = dados_extraidos[:11]
-        natais = dados_extraidos[11:22]
-        
-        # Processar apenas planetas relevantes para trânsitos
-        planetas_processados = {}
-        
-        for transito in transitos:
-            if transito and transito.get('name') in calc.planetas_relevantes:
-                nome = transito.get('name')
-                logger.info(f"Processando {nome} com cálculos astronômicos")
-                planetas_processados[nome] = calc.processar_planeta_preciso(transito, natais)
-        
-        # Output com informações da biblioteca usada
-        return {
-            'periodo_analise': '1 ano',
-            'biblioteca_usada': 'SwissEph' if SWISSEPH_DISPONIVEL else 'PyEphem',
-            'precisao': 'Astronômica profissional',
-            'planetas': planetas_processados
-        }
+        # Processar a nova estrutura: [{"json": [...]}]
+        if len(data) == 1 and isinstance(data[0], dict) and 'json' in data[0]:
+            dados_internos = data[0]['json']
+            logger.info(f"Extraindo {len(dados_internos)} elementos da estrutura json")
+            
+            # Separar planetas de trânsito, natais e casas
+            planetas_transito = []
+            planetas_natais = []
+            casas_natais = []
+            dados_gerais = {}
+            
+            for item in dados_internos:
+                if isinstance(item, dict):
+                    if 'name' in item and 'fullDegree' in item:
+                        # É um planeta
+                        if len(planetas_transito) < 11:
+                            planetas_transito.append(item)
+                        else:
+                            planetas_natais.append(item)
+                    elif 'houses' in item:
+                        # São as casas
+                        casas_natais = item['houses']
+                    elif 'status' in item:
+                        # São dados gerais
+                        dados_gerais = item
+            
+            logger.info(f"Planetas trânsito: {len(planetas_transito)}, Natais: {len(planetas_natais)}, Casas: {len(casas_natais)}")
+            
+            # Processar apenas planetas relevantes para trânsitos
+            planetas_processados = {}
+            
+            for transito in planetas_transito:
+                if transito and transito.get('name') in calc.planetas_relevantes:
+                    nome = transito.get('name')
+                    logger.info(f"Processando {nome} com cálculos astronômicos")
+                    planetas_processados[nome] = calc.processar_planeta_preciso(transito, planetas_natais)
+            
+            # Output com informações da biblioteca usada
+            return {
+                'periodo_analise': '1 ano',
+                'biblioteca_usada': 'SwissEph' if SWISSEPH_DISPONIVEL else 'PyEphem',
+                'precisao': 'Astronômica profissional',
+                'planetas': planetas_processados,
+                'dados_gerais': dados_gerais,
+                'casas_natais': casas_natais
+            }
+        else:
+            # Estrutura antiga para compatibilidade
+            logger.info(f"Processando {len(data)} elementos com estrutura antiga")
+            
+            if len(data) < 23:
+                raise HTTPException(status_code=400, detail=f"Dados insuficientes: {len(data)} elementos")
+            
+            # Extrair dados da chave 'json' se necessário
+            dados_extraidos = []
+            for item in data:
+                if isinstance(item, dict) and 'json' in item:
+                    dados_extraidos.append(item['json'])
+                else:
+                    dados_extraidos.append(item)
+            
+            # Separar dados
+            transitos = dados_extraidos[:11]
+            natais = dados_extraidos[11:22]
+            
+            # Processar apenas planetas relevantes para trânsitos
+            planetas_processados = {}
+            
+            for transito in transitos:
+                if transito and transito.get('name') in calc.planetas_relevantes:
+                    nome = transito.get('name')
+                    logger.info(f"Processando {nome} com cálculos astronômicos")
+                    planetas_processados[nome] = calc.processar_planeta_preciso(transito, natais)
+            
+            # Output com informações da biblioteca usada
+            return {
+                'periodo_analise': '1 ano',
+                'biblioteca_usada': 'SwissEph' if SWISSEPH_DISPONIVEL else 'PyEphem',
+                'precisao': 'Astronômica profissional',
+                'planetas': planetas_processados
+            }
         
     except Exception as e:
         logger.error(f"Erro: {e}")
@@ -1883,4 +1936,4 @@ if __name__ == "__main__":
         print("⚠️  AVISO: Nenhuma biblioteca astronômica instalada!")
         print("📦 Instale: pip install pyswisseph")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
