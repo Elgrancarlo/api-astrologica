@@ -1652,26 +1652,40 @@ async def transitos_precisos(data: List[Dict[str, Any]]):
         if not isinstance(dados_internos, list):
             dados_internos = [dados_internos]
         
-        # Separar planetas de trânsito, natais e casas
-        planetas_transito = []
+        # ✅ SEPARAR dados corretamente
         planetas_natais = []
+        transitos_dados = None
         casas_natais = []
         dados_gerais = {}
         
         for item in dados_internos:
             if isinstance(item, dict):
                 if 'name' in item and 'fullDegree' in item:
-                    # É um planeta
-                    if len(planetas_transito) < 11:
-                        planetas_transito.append(item)
-                    else:
-                        planetas_natais.append(item)
+                    # Planetas natais
+                    planetas_natais.append(item)
                 elif 'houses' in item:
-                    # São as casas
+                    # Cúspides das casas
                     casas_natais = item['houses']
+                elif 'transitos' in item:
+                    # ✅ DADOS DE TRÂNSITOS
+                    transitos_dados = item['transitos']
                 elif 'status' in item:
                     # São dados gerais
                     dados_gerais = item
+        
+        # ✅ CONVERTER trânsitos para formato compatível
+        planetas_transito = []
+        if transitos_dados:
+            for nome_planeta, dados_planeta in transitos_dados.items():
+                planeta_convertido = {
+                    'name': nome_planeta,
+                    'fullDegree': dados_planeta['longitude_atual'],
+                    'sign': dados_planeta['signo_atual'],
+                    'normDegree': dados_planeta['grau_atual'],
+                    'speed': dados_planeta['velocidade_diaria'],
+                    'isRetro': str(dados_planeta['retrogrado']).lower()
+                }
+                planetas_transito.append(planeta_convertido)
         
         logger.info(f"Planetas trânsito: {len(planetas_transito)}, Natais: {len(planetas_natais)}, Casas: {len(casas_natais)}")
         
