@@ -1199,6 +1199,12 @@ class TransitoAstrologicoPreciso:
                 
                 try:
                     resultado = swe.calc_ut(jd_ut, id_swe)
+                    
+                    # Verificar se o resultado é válido
+                    if not resultado or len(resultado) == 0 or len(resultado[0]) < 4:
+                        logger.error(f"Resultado inválido para {nome_planeta}: {resultado}")
+                        continue
+                    
                     longitude = resultado[0][0]
                     velocidade = resultado[0][3]
                     
@@ -1805,6 +1811,12 @@ async def calcular_transitos_simples(data: Dict[str, Any]):
             
             try:
                 resultado = swe.calc_ut(jd_ut, id_swe)
+                
+                # Verificar se o resultado é válido
+                if not resultado or len(resultado) == 0 or len(resultado[0]) < 4:
+                    logger.error(f"Resultado inválido para {nome_planeta}: {resultado}")
+                    continue
+                
                 longitude = resultado[0][0]
                 velocidade = resultado[0][3]
                 
