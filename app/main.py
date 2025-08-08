@@ -900,13 +900,19 @@ class TransitoAstrologicoPreciso:
             logger.error(f"Erro ao determinar casa: {e}")
             return 1
     
-    def processar_planeta_preciso(self, planeta: Dict, natais: List[Dict]) -> Dict:
+    def processar_planeta_preciso(self, planeta: Dict, natais: List[Dict], cuspides: List[Dict] = None) -> Dict:
         """Processa planeta com todas as otimizações implementadas"""
         try:
             nome = planeta.get('name', 'Desconhecido')
             signo = planeta.get('sign', 'Áries')
             grau = float(planeta.get('normDegree', 0))
-            casa_atual = int(planeta.get('house', 1))
+            longitude = float(planeta.get('fullDegree', 0))  # ✅ USAR LONGITUDE
+            
+            # ✅ CALCULAR CASA CORRETA
+            if cuspides:
+                casa_atual = self.determinar_casa_por_cuspides(longitude, cuspides)
+            else:
+                casa_atual = int(planeta.get('house', 1))  # Fallback
             
             resultado = {
                 'signo_atual': signo,
@@ -1696,7 +1702,7 @@ async def transitos_precisos(data: List[Dict[str, Any]]):
             if transito and transito.get('name') in calc.planetas_relevantes:
                 nome = transito.get('name')
                 logger.info(f"Processando {nome} com cálculos astronômicos")
-                planetas_processados[nome] = calc.processar_planeta_preciso(transito, planetas_natais)
+                planetas_processados[nome] = calc.processar_planeta_preciso(transito, planetas_natais, casas_natais)
         
         # Output com informações da biblioteca usada
         return {
