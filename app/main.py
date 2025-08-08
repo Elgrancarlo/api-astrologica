@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Any, Optional
 import uvicorn
@@ -1738,7 +1738,7 @@ async def transitos_especificos(data: List[Dict[str, Any]]):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/calcular-transitos-simples")
-async def calcular_transitos_simples(data: Any):
+async def calcular_transitos_simples(data: Any = Body(...)):
     """
     ✅ ENDPOINT SIMPLES: Calcula apenas trânsitos para uma data específica
     
