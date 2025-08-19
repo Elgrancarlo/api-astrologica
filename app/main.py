@@ -1701,16 +1701,27 @@ async def teste_urano():
 @app.post("/transitos-astronomicos-precisos")
 async def transitos_precisos(data: List[Dict[str, Any]]):
     """
-    ENDPOINT CORRIGIDO v12.2 - TODOS os bugs resolvidos
+    ENDPOINT DEPRECADO - Use /transitos-simplificados
+    Mantido para compatibilidade. Redirecionando para versão simplificada.
+    """
+    # Redirecionar para o novo endpoint simplificado
+    return await transitos_simplificados(data)
+
+# Manter compatibilidade com endpoint anterior
+@app.post("/transitos-astronomicos")
+async def transitos_astronomicos(data: List[Dict[str, Any]]):
+    """Redirecionamento para endpoint preciso"""
+    return await transitos_precisos(data)
+
+@app.post("/transitos-simplificados")
+async def transitos_simplificados(data: List[Dict[str, Any]]):
+    """
+    Endpoint simplificado para análise de trânsitos
+    Foca apenas na posição atual dos planetas em relação às cúspides
+    Análise baseada exclusivamente em: longitude atual vs cúspides das casas
     """
     try:
-        if not SWISSEPH_DISPONIVEL and not PYEPHEM_DISPONIVEL:
-            raise HTTPException(
-                status_code=500, 
-                detail="Nenhuma biblioteca astronômica disponível. Instale: pip install pyswisseph"
-            )
-        
-        logger.info(f"[v12.2] Processando dados com TODAS as correções")
+        logger.info(f"[SIMPLIFICADO] Processando {len(data)} elementos")
         
         # Processar diferentes formatos de dados
         dados_internos = []
@@ -1718,17 +1729,16 @@ async def transitos_precisos(data: List[Dict[str, Any]]):
         # Verificar se é formato com wrapper: [{"json": [...]}]
         if len(data) == 1 and isinstance(data[0], dict) and 'json' in data[0]:
             dados_internos = data[0]['json']
-            logger.info(f"[v12.2] Extraindo {len(dados_internos)} elementos da estrutura json com wrapper")
+            logger.info(f"[SIMPLIFICADO] Extraindo {len(dados_internos)} elementos do wrapper json")
         else:
-            # Formato direto: dados já estão no formato correto
             dados_internos = data
-            logger.info(f"[v12.2] Processando {len(dados_internos)} elementos com formato direto")
+            logger.info(f"[SIMPLIFICADO] Processando {len(dados_internos)} elementos diretos")
         
         # Garantir que dados_internos é uma lista
         if not isinstance(dados_internos, list):
             dados_internos = [dados_internos]
         
-        # SEPARAR dados corretamente
+        # Separar dados
         planetas_natais = []
         transitos_dados = None
         casas_natais = []
@@ -1742,63 +1752,126 @@ async def transitos_precisos(data: List[Dict[str, Any]]):
                 elif 'houses' in item:
                     # Cúspides das casas
                     casas_natais = item['houses']
+                    logger.info(f"[SIMPLIFICADO] Encontradas {len(casas_natais)} cúspides")
                 elif 'transitos' in item:
-                    # DADOS DE TRÂNSITOS
+                    # Dados de trânsitos
                     transitos_dados = item['transitos']
+                    logger.info(f"[SIMPLIFICADO] Encontrados dados de trânsitos")
                 elif 'status' in item:
-                    # São dados gerais
+                    # Dados gerais
                     dados_gerais = item
         
-        # CONVERTER trânsitos para formato compatível
+        # Verificar se temos cúspides
+        if not casas_natais:
+            raise HTTPException(
+                status_code=400,
+                detail="Cúspides das casas não fornecidas. São necessárias para análise simplificada."
+            )
+        
+        # Converter trânsitos para formato padrão
         planetas_transito = []
         if transitos_dados:
             for nome_planeta, dados_planeta in transitos_dados.items():
-                planeta_convertido = {
-                    'name': nome_planeta,
-                    'fullDegree': dados_planeta['longitude_atual'],
-                    'sign': dados_planeta['signo_atual'],
-                    'normDegree': dados_planeta['grau_atual'],
-                    'speed': dados_planeta['velocidade_diaria'],
-                    'isRetro': str(dados_planeta['retrogrado']).lower()
-                }
-                planetas_transito.append(planeta_convertido)
+                if nome_planeta in calc.planetas_relevantes:
+                    planeta_convertido = {
+                        'name': nome_planeta,
+                        'fullDegree': dados_planeta.get('longitude_atual', 0),
+                        'sign': dados_planeta.get('signo_atual', ''),
+                        'normDegree': dados_planeta.get('grau_atual', 0),
+                        'speed': dados_planeta.get('velocidade_diaria', 0),
+                        'isRetro': str(dados_planeta.get('retrogrado', False)).lower()
+                    }
+                    planetas_transito.append(planeta_convertido)
         
-        logger.info(f"[v12.2] Planetas trânsito: {len(planetas_transito)}, Natais: {len(planetas_natais)}, Casas: {len(casas_natais)}")
+        logger.info(f"[SIMPLIFICADO] Processando {len(planetas_transito)} planetas em trânsito")
         
-        # Processar apenas planetas relevantes para trânsitos
+        # Processar cada planeta de forma simplificada
         planetas_processados = {}
         
         for transito in planetas_transito:
-            if transito and transito.get('name') in calc.planetas_relevantes:
-                nome = transito.get('name')
-                logger.info(f"[v12.2] Processando {nome} com TODAS as correções")
+            nome = transito.get('name')
+            if nome:
+                logger.info(f"[SIMPLIFICADO] Processando {nome}")
                 
-                # ✅ USAR FUNÇÃO CORRIGIDA v12.2
-                planetas_processados[nome] = calc.processar_planeta_preciso_CORRIGIDO(
-                    transito, planetas_natais, casas_natais
-                )
+                # Análise simplificada: apenas posição atual na casa
+                signo = transito.get('sign', 'Áries')
+                grau = float(transito.get('normDegree', 0))
+                longitude = float(transito.get('fullDegree', 0))
+                velocidade = float(transito.get('speed', 0))
+                retrogrado = str(transito.get('isRetro', 'false')).lower() == 'true' or velocidade < 0
+                
+                # Determinar casa atual usando cúspides existentes
+                casa_atual = calc.determinar_casa_por_cuspides(longitude, casas_natais)
+                
+                # Informações sobre a casa
+                casa_idx = casa_atual - 1
+                proxima_idx = casa_atual % 12
+                
+                cusp_atual = casas_natais[casa_idx]['degree']
+                cusp_proxima = casas_natais[proxima_idx]['degree']
+                
+                # Calcular graus até próxima casa
+                if cusp_proxima > longitude:
+                    graus_ate_proxima = cusp_proxima - longitude
+                else:
+                    graus_ate_proxima = (360 - longitude) + cusp_proxima
+                
+                # Construir resposta simplificada
+                planetas_processados[nome] = {
+                    'posicao_atual': {
+                        'signo': signo,
+                        'grau': round(grau, 2),
+                        'longitude_absoluta': round(longitude, 2),
+                        'casa': casa_atual
+                    },
+                    'movimento': {
+                        'velocidade_diaria': round(velocidade, 4),
+                        'retrogrado': retrogrado,
+                        'direcao': 'Retrógrado' if retrogrado else 'Direto'
+                    },
+                    'info_casa': {
+                        'casa_atual': casa_atual,
+                        'cuspide_casa_atual': round(cusp_atual, 2),
+                        'cuspide_proxima_casa': round(cusp_proxima, 2),
+                        'graus_ate_proxima_casa': round(graus_ate_proxima, 2)
+                    },
+                    'analise': f"{nome} está a {grau:.1f}° de {signo} na Casa {casa_atual}" + 
+                              (f" em movimento retrógrado" if retrogrado else "")
+                }
         
-        # Output com informações da biblioteca usada
-        return {
-            'periodo_analise': '1 ano',
-            'biblioteca_usada': 'SwissEph' if SWISSEPH_DISPONIVEL else 'PyEphem',
-            'precisao': 'Astronômica profissional',
-            'versao': 'v12.2 - TODOS os bugs corrigidos',
-            'planetas': planetas_processados,
-            'dados_gerais': dados_gerais,
-            'casas_natais': casas_natais
+        # Resposta final simplificada
+        resposta = {
+            'tipo_analise': 'Simplificada baseada em cúspides',
+            'data_analise': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'metodo': 'Comparação direta longitude vs cúspides',
+            'planetas_em_transito': planetas_processados,
+            'cuspides_utilizadas': [
+                {
+                    'casa': c['house'],
+                    'grau': round(c['degree'], 2),
+                    'signo': c.get('sign', '')
+                }
+                for c in casas_natais
+            ],
+            'total_planetas_analisados': len(planetas_processados)
         }
-
         
+        # Adicionar resumo executivo
+        resumo = []
+        for nome, dados in planetas_processados.items():
+            if 'analise' in dados:
+                resumo.append(dados['analise'])
+        
+        if resumo:
+            resposta['resumo_executivo'] = resumo
+        
+        return resposta
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"[v12.2] Erro: {e}")
+        logger.error(f"[SIMPLIFICADO] Erro geral: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-# Manter compatibilidade com endpoint anterior
-@app.post("/transitos-astronomicos")
-async def transitos_astronomicos(data: List[Dict[str, Any]]):
-    """Redirecionamento para endpoint preciso"""
-    return await transitos_precisos(data)
 
 @app.post("/transitos-especificos")
 async def transitos_especificos(data: List[Dict[str, Any]]):
