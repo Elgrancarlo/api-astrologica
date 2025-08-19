@@ -1804,8 +1804,9 @@ async def transitos_simplificados(data: List[Dict[str, Any]]):
                 casa_atual = calc.determinar_casa_por_cuspides(longitude, casas_natais)
                 
                 # Informações sobre a casa
-                casa_idx = casa_atual - 1
-                proxima_idx = casa_atual % 12
+                casa_idx = casa_atual - 1  # Índice da casa atual (0-11)
+                proxima_casa = (casa_atual % 12) + 1  # Próxima casa (1-12)
+                proxima_idx = proxima_casa - 1  # Índice da próxima casa (0-11)
                 
                 cusp_atual = casas_natais[casa_idx]['degree']
                 cusp_proxima = casas_natais[proxima_idx]['degree']
